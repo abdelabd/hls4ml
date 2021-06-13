@@ -37,6 +37,34 @@ void transpose_3d(
     }
 }
 
+template<class data_T, class res_T, typename CONFIG_T>
+void vec_to_mat( //faster (I think)
+    data_T vec[CONFIG_T::n_rows*CONFIG_T::n_cols],
+    res_T mat[CONFIG_T::n_rows][CONFIG_T::n_cols]
+) {
+    int i=0;
+    for (int r=0; r < CONFIG_T::n_rows; r++){
+      for (int c=0; c < CONFIG_T::n_cols; c++){
+        mat[r][c] = vec[i];
+        i += 1;
+      }
+    }
+}
+
+template<class data_T, class res_T, typename CONFIG_T>
+void mat_to_vec( //faster (I think)
+    data_T mat[CONFIG_T::n_rows][CONFIG_T::n_cols],
+    res_T vec[CONFIG_T::n_rows*CONFIG_T::n_cols]
+) {
+    int i=0;
+    for (int r=0; r < CONFIG_T::n_rows; r++){
+      for (int c=0; c<CONFIG_T::n_cols; c++){
+      vec[i] = mat[r][c];
+      i += 1;
+      }
+    }
+}
+
 }
 
 #endif

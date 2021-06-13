@@ -12,6 +12,7 @@ from collections import OrderedDict
 from hls4ml.model.hls_layers import *
 from hls4ml.templates import get_backend
 from hls4ml.writer import get_writer
+from hls4ml.writer.vivado_writer import VivadoWriter_GNN
 from hls4ml.model.optimizer import optimize_model, get_available_passes
 from hls4ml.report.vivado_report import parse_vivado_report
 
@@ -567,4 +568,12 @@ class HLSModel(object):
         os.chdir(curr_dir)
 
         return parse_vivado_report(self.config.get_output_dir())
+    
+class HLSModel_GNN(HLSModel):
+    def __init__(self, config, reader, layer_list):
+        super().__init__(config, reader, layer_list)
+        self.config.writer = VivadoWriter_GNN()
+
+    def get_weights_data(self, module_name, layer_name, var_name):
+        return self.reader.get_weights_data(module_name, layer_name, var_name)
 

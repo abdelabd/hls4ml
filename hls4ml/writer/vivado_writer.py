@@ -654,3 +654,184 @@ class VivadoWriter(Writer):
         self.write_yml(model)
         self.write_tar(model)
         print('Done')
+ 
+class VivadoWriter_GNN(VivadoWriter):
+
+    def write_test_bench(self, model):
+        ###################
+        ## test bench
+        ###################
+
+        filedir = os.path.dirname(os.path.abspath(__file__))
+
+        if not os.path.exists('{}/tb_data/'.format(model.config.get_output_dir())):
+            os.mkdir('{}/tb_data/'.format(model.config.get_output_dir()))
+
+        input_edge_data = model.config.get_config_value('InputEdgeData')        
+        input_node_data = model.config.get_config_value('InputNodeData')
+        input_edge_index = model.config.get_config_value('InputEdgeIndex')
+        output_predictions = model.config.get_config_value('OutputPredictions')
+        
+        if input_edge_data:
+            if input_edge_data[-3:] == "dat":
+                copyfile(input_edge_data, '{}/tb_data/tb_input_edge_features.dat'.format(model.config.get_output_dir()))
+            else:
+                self.__make_dat_file(input_edge_data,'{}/tb_data/tb_input_edge_features.dat'.format(model.config.get_output_dir()))
+
+        if input_node_data:
+            if input_node_data[-3:] == "dat":
+                copyfile(input_node_data, '{}/tb_data/tb_input_node_features.dat'.format(model.config.get_output_dir()))
+            else:
+                self.__make_dat_file(input_node_data,'{}/tb_data/tb_input_node_features.dat'.format(model.config.get_output_dir()))
+
+        if input_edge_index:
+            if input_edge_index[-3:] == "dat":
+                copyfile(input_edge_index, '{}/tb_data/tb_input_edge_index.dat'.format(model.config.get_output_dir()))
+            else:
+                self.__make_dat_file(input_edge_index,'{}/tb_data/tb_input_edge_index.dat'.format(model.config.get_output_dir()))
+        
+        if output_predictions:
+            if output_predictions[-3:] == "dat":
+                copyfile(output_predictions, '{}/tb_data/tb_output_predictions.dat'.format(model.config.get_output_dir()))
+            else:
+                self.__make_dat_file(output_predictions,'{}/tb_data/tb_output_predictions.dat'.format(model.config.get_output_dir()))
+
+        f = open(os.path.join(filedir,'../templates/vivado/myproject_gnn_test.cpp'),'r')
+        fout = open('{}/{}_test.cpp'.format(model.config.get_output_dir(), model.config.get_project_name()),'w')
+
+        for line in f.readlines():
+            indent = ' ' * (len(line) - len(line.lstrip(' ')))
+
+            #Insert numbers
+            if 'myproject' in line:
+                newline = line.replace('myproject', model.config.get_project_name())
+            elif '//hls-fpga-machine-learning insert data' in line:
+                newline = line
+                offset = 0
+                for i, inp in enumerate(model.get_input_variables()):
+                    newline += '      ' + self.variable_definition_cpp(model, inp) + ';\n'
+                    newline += '      nnet::copy_data<float, {}, {}, {}>(in{}, {});\n'.format(inp.type.name, offset, inp.size_cpp(), i+1, inp.cppname)
+                    offset += inp.size()
+                for out in model.get_output_variables():
+                    newline += '      ' + self.variable_definition_cpp(model, out) + ';\n'
+            elif '//hls-fpga-machine-learning insert zero' in line:
+                newline = line
+                for inp in model.get_input_variables():
+                    newline += '    ' + self.variable_definition_cpp(model, inp) + ';\n'
+                    newline += '    nnet::fill_zero<{}, {}>({});\n'.format(inp.type.name, inp.size_cpp(), inp.cppname)
+                for out in model.get_output_variables():
+                    newline += '    ' + self.variable_definition_cpp(model, out) + ';\n'
+            elif '//hls-fpga-machine-learning insert top-level-function' in line:
+                newline = line
+
+                size_str = indent + 'unsigned short {},{};\n'
+                input_size_vars = ','.join(['size_in{}'.format(i) for i in range(1, len(model.get_input_variables()) + 1)])
+                output_size_vars = ','.join(['size_out{}'.format(o) for o in range(1, len(model.get_output_variables()) + 1)])
+                newline += size_str.format(input_size_vars, output_size_vars)
+
+                input_vars = ','.join([i.cppname for i in model.get_input_variables()])
+                output_vars = ','.join([o.cppname for o in model.get_output_variables()])
+                top_level = indent + '{}({},{},{},{});\n'.format(model.config.get_project_name(), input_vars, output_vars, input_size_vars, output_size_vars)
+                newline += top_level
+            elif '//hls-fpga-machine-learning insert predictions' in line:
+                newline = line
+                for out in model.get_output_variables():
+                    newline += indent + 'for(int i = 0; i < {}; i++) {{\n'.format(out.size_cpp())
+                    newline += indent + '  std::cout << pr[i] << " ";\n'
+                    newline += indent + '}\n'
+                    newline += indent + 'std::cout << std::endl;\n'
+            elif '//hls-fpga-machine-learning insert tb-output' in line:
+                newline = line
+                for out in model.get_output_variables():
+                    newline += indent + 'nnet::print_result<{}, {}>({}, fout);\n'.format(out.type.name, out.size_cpp(), out.cppname) #TODO enable this
+            elif '//hls-fpga-machine-learning insert output' in line or '//hls-fpga-machine-learning insert quantized' in line:
+                newline = line
+                for out in model.get_output_variables():
+                    newline += indent + 'nnet::print_result<{}, {}>({}, std::cout, true);\n'.format(out.type.name, out.size_cpp(), out.cppname)
+            else:
+                newline = line
+            fout.write(newline)
+        f.close()
+        fout.close()
+
+    def write_yml(self, model):
+        nonmodel_config = {}
+        submodule_config = {}
+
+        for key, val in model.config.config.items():
+            if key == 'PytorchModel':
+                for mkey, mval in val._modules.items():
+                    submodule_config[mkey] = mval
+            else:
+                nonmodel_config[key] = val
+
+        with open(model.config.get_output_dir() + "/nonmodel_config.yml", 'w') as file:
+            yaml.dump(nonmodel_config, file)
+        with open(model.config.get_output_dir() + "/submodule_config.yml", 'w') as file:
+            yaml.dump(submodule_config, file)
+
+        with open(model.config.get_output_dir() + "/submodule_config.yml", "r") as file:
+            submodule_config_str = file.read()
+        with open(model.config.get_output_dir() + "/nonmodel_config.yml", "r") as file:
+            nonmodel_config_str = file.read()
+
+        indent = "  "
+        model_config_str = f"PytorchModel: !!python/object:__main__.{model.config.config['PytorchModel'].__class__.__name__}"
+
+        model_config_str += "\n" + indent + "_backward_hooks: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + "_buffers: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + "_forward_hooks: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + "_forward_pre_hooks: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + "_load_state_dict_pre_hooks: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + "_non_persistent_buffer_sets: !!set {}"
+
+        model_config_str += "\n" + indent + "_parameters: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + "_state_dict_hooks: !!python/object/apply:collections.OrderedDict"
+        model_config_str += "\n" + indent + "- []"
+
+        model_config_str += "\n" + indent + f"input_shape: {[model.reader.n_edge, model.reader.edge_dim], [model.reader.n_node, model.reader.node_dim], [2, model.reader.n_edge]}"
+        model_config_str += "\n" + indent + "quantized_model: false"
+        model_config_str += "\n" + indent + "training: true"
+        model_config_str += "\n" + indent + "_modules: !!python/object/apply:collections.OrderedDict"
+
+        submodule_config_lines = submodule_config_str.split("\n")
+        first_submodule_accounted = False
+        for i, line in enumerate(submodule_config_lines):
+            colon_start = line.find(":")
+
+            if line[:colon_start] in model.reader.torch_model._modules.keys():
+                newline = [line[:colon_start], line[colon_start + 1:]]
+
+                if first_submodule_accounted:
+                    newline[0] = indent + indent + "- - " + newline[0]
+                else:
+                    newline[0] = indent + "- - - " + newline[0]
+                    first_submodule_accounted = True
+
+                newline[1] = indent + indent + indent + "- " + newline[1]
+                newline = "\n".join(newline)
+                submodule_config_lines[i] = newline
+
+            else:
+                newline = indent + indent + indent + line
+                submodule_config_lines[i] = newline
+
+        top_config_str = nonmodel_config_str + model_config_str + "\n" + "\n".join(submodule_config_lines)
+        with open(model.config.get_output_dir() + "/hls4ml_config.yml", 'w') as file:
+            file.write(top_config_str)
+
+        os.remove(model.config.get_output_dir() + "/submodule_config.yml")
+        os.remove(model.config.get_output_dir() + "/nonmodel_config.yml")
+
