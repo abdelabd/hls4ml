@@ -131,8 +131,8 @@ namespace nnet {
 
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
     void IN_edge_module(
+            data_T    Rn_1D[CONFIG_T::n_node*CONFIG_T::n_features],
 			data_T    Re_1D[CONFIG_T::n_edge*CONFIG_T::e_features],
-			data_T    Rn_1D[CONFIG_T::n_node*CONFIG_T::n_features],
 			index_T   edge_index_1D[CONFIG_T::n_edge*2],
 			res_T     L_1D[CONFIG_T::n_edge*CONFIG_T::n_out],
 			res_T     Q_1D[CONFIG_T::n_node*CONFIG_T::n_out],
@@ -147,13 +147,13 @@ namespace nnet {
 
   {
     //input vectors --> input arrays
-    // 1. Re
-    data_T Re[CONFIG_T::n_edge][CONFIG_T::e_features];
-    nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::Re_config>(Re_1D, Re);
-
-    // 2. Rn
+    // 1. Rn
     data_T Rn[CONFIG_T::n_node][CONFIG_T::n_features];
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::Rn_config>(Rn_1D, Rn);
+
+    // 2. Re
+    data_T Re[CONFIG_T::n_edge][CONFIG_T::e_features];
+    nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::Re_config>(Re_1D, Re);
 
     // 3. edge_index
     index_T edge_index[2][CONFIG_T::n_edge];

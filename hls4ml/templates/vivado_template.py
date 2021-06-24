@@ -387,7 +387,7 @@ resize_function_template = 'nnet::resize_{algorithm}<{input_t}, {config}>({input
 transpose_function_template = 'nnet::transpose{dim}<{input_t}, {config}>({input}, {output});'
 garnet_function_template = 'nnet::garnet{impl}<{input_t}, {integer_input_t}, {output_t}, {config}>({input}, {nvtx}, {output});'
 garnet_stack_function_template = 'nnet::garnet_stack<{input_t}, {integer_input_t}, {output_t}, {config}>({input}, {nvtx}, {output});'
-EdgeBlock_function_template = 'nnet::IN_edge_module<{input_t}, {index_t}, {output_t}, {config}>({edge_attr}, {node_attr}, {edge_index}, {L}, {Q}, {w0}, {b0}, {w1}, {b1}, {w2}, {b2}, {w3}, {b3});'
+EdgeBlock_function_template = 'nnet::IN_edge_module<{input_t}, {index_t}, {output_t}, {config}>({node_attr}, {edge_attr}, {edge_index}, {L}, {Q}, {w0}, {b0}, {w1}, {b1}, {w2}, {b2}, {w3}, {b3});'
 NodeBlock_function_template = 'nnet::IN_node_module<{input_t}, {output_t}, {config}>({node_attr}, {Q}, {P}, {w0}, {b0}, {w1}, {b1}, {w2}, {b2}, {w3}, {b3});'
 
 dense_include_list = ['nnet_utils/nnet_dense.h', 'nnet_utils/nnet_dense_compressed.h', 'nnet_utils/nnet_dense_stream.h']

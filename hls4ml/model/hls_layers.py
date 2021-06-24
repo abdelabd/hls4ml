@@ -1770,15 +1770,14 @@ class EdgeBlock(Layer):
                          compression=self.model.config.get_compression(self))
         self.add_bias(quantizer=self.get_attr('weight_quantizer'))
 
-
     def function_cpp(self):
         params = {}
         params['config'] = 'config{}'.format(self.index)
         params['input_t'] = self.model.get_layer_output_variable('edge_attr').type.name
         params['index_t'] = self.model.get_layer_output_variable('edge_index').type.name
         params['output_t'] = self.get_output_variable().type.name
-        params['edge_attr'] = self.attributes['inputs'][0]
-        params['node_attr'] = self.attributes['inputs'][1]
+        params['node_attr'] = self.attributes['inputs'][0]
+        params['edge_attr'] = self.attributes['inputs'][1]
         params['edge_index'] = self.attributes['inputs'][2]
         params['L'] = f"layer{self.index}_out_L"
         params['Q'] = f"layer{self.index}_out_Q"
