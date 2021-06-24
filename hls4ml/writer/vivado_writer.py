@@ -294,6 +294,8 @@ class VivadoWriter(Writer):
                 newline = line
                 numbers = OrderedDict.fromkeys([layer.get_numbers_cpp() for layer in model.get_layers()])
                 newline += ''.join(numbers)
+                newline = '\n'.join(set(newline.split('\n')))
+                newline += '\n'
 
             elif '//hls-fpga-machine-learning insert layer-precision' in line:
                 newline = line

@@ -577,3 +577,13 @@ class HLSModel_GNN(HLSModel):
     def get_weights_data(self, module_name, layer_name, var_name):
         return self.reader.get_weights_data(module_name, layer_name, var_name)
 
+    def _get_top_function(self, N, E, edge_index):
+        raise NotImplementedError("not implemented yet")
+
+    def compute_n_samples(self, N, E, edge_index):
+        raise NotImplementedError("not implemented yet")
+
+    def predict(self, N, E, edge_index):
+        raise NotImplementedError("not implemented yet")
+
+
