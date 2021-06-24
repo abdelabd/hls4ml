@@ -37,6 +37,10 @@ void transpose_3d(
     }
 }
 
+struct matrix_config{
+    static const unsigned n_rows = 10;
+    static const unsigned n_cols = 10;
+};
 template<class data_T, class res_T, typename CONFIG_T>
 void vec_to_mat( //faster (I think)
     data_T vec[CONFIG_T::n_rows*CONFIG_T::n_cols],
