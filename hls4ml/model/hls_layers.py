@@ -1654,7 +1654,6 @@ class GarNet(Layer):
             params['{}_t'.format(wname)] = weights.type.name
             params['{}_size'.format(wname)] = weights.data_length
 
-
 class GarNetStack(GarNet):
     def _initialize_transforms(self):
         self._sublayer_weights = []
@@ -1740,9 +1739,9 @@ class EdgeBlock(Layer):
         self.n_edge = self.attributes['n_edge']
         self.node_dim = self.attributes['node_dim']
         self.edge_dim = self.attributes['edge_dim']
+        self.out_dim = self.attributes['out_dim']
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
-        self.out_dim = self.attributes['out_dim']
         self.torch_module = getattr(self.model.reader.torch_model, self.name)
 
         submodules = OrderedDict()
@@ -1779,6 +1778,7 @@ class EdgeBlock(Layer):
         params['node_attr'] = self.attributes['inputs'][0]
         params['edge_attr'] = self.attributes['inputs'][1]
         params['edge_index'] = self.attributes['inputs'][2]
+        params['aggr'] = self.model.reader.torch_model.aggr
         params['L'] = f"layer{self.index}_out_L"
         params['Q'] = f"layer{self.index}_out_Q"
 
@@ -1878,12 +1878,10 @@ class EdgeBlock(Layer):
         params['weight_t'] = 'ap_fixed<16,6>'
         params['n_node'] = self.n_node_cppname
         params['n_edge'] = self.n_edge_cppname
-        params['n_in'] = 10
-        params['n_hidden'] = 40
-        params['n_out'] = self.out_dim
-        params['n_layers'] = 3
-        params['edge_dim'] = self.edge_dim_cppname
         params['node_dim'] = self.node_dim_cppname
+        params['edge_dim'] = self.edge_dim_cppname
+        params['out_dim'] = self.out_dim
+        params['n_layers'] = 3
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
@@ -1990,43 +1988,56 @@ class EdgeBlock(Layer):
             static const unsigned n_cols = {n_cols};
         }};"""
 
-        Re_params = {
-            'matrix_name': 'Re',
-            'n_rows': self.n_edge_cppname,
-            'n_cols': self.edge_dim_cppname
-        }
-        configs['Re_config'] = matrix_config_template.format(**Re_params)
-
-        Rn_params = {
-            'matrix_name': 'Rn',
+        node_attr_params = {
+            'matrix_name': 'node_attr',
             'n_rows': self.n_node_cppname,
             'n_cols': self.node_dim_cppname
         }
-        configs['Rn_config'] = matrix_config_template.format(**Rn_params)
+        configs['node_attr_config'] = matrix_config_template.format(**node_attr_params)
+
+        edge_attr_params = {
+            'matrix_name': 'edge_attr',
+            'n_rows': self.n_edge_cppname,
+            'n_cols': self.edge_dim_cppname
+        }
+        configs['edge_attr_config'] = matrix_config_template.format(**edge_attr_params)
 
         edge_index_params = {
             'matrix_name': 'edge_index',
-            'n_rows': 'TWO',
-            'n_cols': self.n_edge_cppname
+            'n_rows': self.n_edge_cppname,
+            'n_cols': 'TWO'
         }
         configs['edge_index_config'] = matrix_config_template.format(**edge_index_params)
 
-        L_params = {
-            'matrix_name': 'L',
+        edge_update_params = {
+            'matrix_name': 'edge_update',
             'n_rows': self.n_edge_cppname,
             'n_cols': f"LAYER{self.index}_OUT_DIM"
         }
-        configs['L_config'] = matrix_config_template.format(**L_params)
+        configs['edge_update_config'] = matrix_config_template.format(**edge_update_params)
 
-        Q_params = {
-            'matrix_name': 'Q',
+        edge_update_aggr_params = {
+            'matrix_name': 'edge_update_aggr',
             'n_rows': self.n_node_cppname,
             'n_cols': f"LAYER{self.index}_OUT_DIM"
         }
-        configs['Q_config'] = matrix_config_template.format(**Q_params)
+        configs['edge_update_aggr_config'] = matrix_config_template.format(**edge_update_aggr_params)
+
+        aggregate_config_template = """struct aggregation_config{index}: nnet::aggregate_config{{
+            static const unsigned n_node = {n_node};
+            static const unsigned n_edge = {n_edge};
+            static const unsigned edge_dim = {edge_dim};
+        }};"""
+
+        aggregation_params = {
+            "index": 1,
+            "n_node": self.n_node,
+            "n_edge": self.n_edge,
+            "edge_dim": self.out_dim
+        }
+        configs["aggregate_config"] = aggregate_config_template.format(**aggregation_params)
 
         return configs
-
 
 class NodeBlock(Layer):
     def initialize(self):
@@ -2170,12 +2181,10 @@ class NodeBlock(Layer):
         params['weight_t'] = 'ap_fixed<16,6>'
         params['n_node'] = self.n_node_cppname
         params['n_edge'] = self.n_edge_cppname
-        params['n_in'] = 10
-        params['n_hidden'] = 40
-        params['n_out'] = self.out_dim
-        params['n_layers'] = 3
-        params['edge_dim'] = self.edge_dim_cppname
         params['node_dim'] = self.node_dim_cppname
+        params['edge_dim'] = self.edge_dim_cppname
+        params['out_dim'] = self.out_dim
+        params['n_layers'] = 3
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
@@ -2273,26 +2282,26 @@ class NodeBlock(Layer):
                     static const unsigned n_cols = {n_cols};
                 }};"""
 
-        Rn_params = {
-            'matrix_name': 'Rn',
+        node_attr_params = {
+            'matrix_name': 'node_attr',
             'n_rows': self.n_node_cppname,
             'n_cols': self.node_dim_cppname
         }
-        configs['Rn_config'] = matrix_config_template.format(**Rn_params)
+        configs['node_attr_config'] = matrix_config_template.format(**node_attr_params)
 
-        Q_params = {
-            'matrix_name': 'Q',
+        edge_attr_aggr_params = {
+            'matrix_name': 'edge_attr_aggr',
             'n_rows': self.n_node_cppname,
             'n_cols': f"LAYER{self.index-1}_OUT_DIM"
         }
-        configs['Q_config'] = matrix_config_template.format(**Q_params)
+        configs['edge_attr_aggr_config'] = matrix_config_template.format(**edge_attr_aggr_params)
 
-        P_params = {
-            'matrix_name': 'P',
+        node_update_params = {
+            'matrix_name': 'node_update',
             'n_rows': self.n_node_cppname,
             'n_cols': f"LAYER{self.index}_OUT_DIM"
         }
-        configs['P_config'] = matrix_config_template.format(**P_params)
+        configs['node_update_config'] = matrix_config_template.format(**node_update_params)
 
         return configs
     
