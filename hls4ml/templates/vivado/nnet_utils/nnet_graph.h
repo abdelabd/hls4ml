@@ -181,6 +181,137 @@ namespace nnet {
     }
 
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
+    void EdgeBlock(
+            data_T    node_attr_1D[CONFIG_T::n_node*CONFIG_T::node_dim],
+			data_T    edge_attr_1D[CONFIG_T::n_edge*CONFIG_T::edge_dim],
+			index_T   edge_index_1D[CONFIG_T::n_edge*2],
+			res_T     edge_update_1D[CONFIG_T::n_edge*CONFIG_T::out_dim],
+			res_T     edge_update_aggr_1D[CONFIG_T::n_node*CONFIG_T::out_dim],
+			typename CONFIG_T::dense_config1::weight_t  core_edge_w0[CONFIG_T::dense_config1::n_in*CONFIG_T::dense_config1::n_out],
+			typename CONFIG_T::dense_config1::bias_t    core_edge_b0[CONFIG_T::dense_config1::n_out],
+			typename CONFIG_T::dense_config2::weight_t  core_edge_w1[CONFIG_T::dense_config2::n_in*CONFIG_T::dense_config2::n_out],
+			typename CONFIG_T::dense_config2::bias_t    core_edge_b1[CONFIG_T::dense_config2::n_out],
+			typename CONFIG_T::dense_config3::weight_t  core_edge_w2[CONFIG_T::dense_config3::n_in*CONFIG_T::dense_config3::n_out],
+			typename CONFIG_T::dense_config3::bias_t    core_edge_b2[CONFIG_T::dense_config3::n_out],
+			typename CONFIG_T::dense_config4::weight_t  core_edge_w3[CONFIG_T::dense_config4::n_in*CONFIG_T::dense_config4::n_out],
+			typename CONFIG_T::dense_config4::bias_t    core_edge_b3[CONFIG_T::dense_config4::n_out])
+  {
+    //input vectors --> input arrays
+    // 1. node_attr
+    data_T node_attr[CONFIG_T::n_node][CONFIG_T::node_dim];
+    nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::node_attr_config>(node_attr_1D, node_attr);
+
+    // 2. edge_attr
+    data_T edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim];
+    nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_config>(edge_attr_1D, edge_attr);
+
+    // 3. edge_index
+    index_T edge_index[CONFIG_T::n_edge][2];
+    nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
+
+    //output arrays
+    // 1. edge_update
+    res_T edge_update[CONFIG_T::n_edge][CONFIG_T::out_dim];
+
+    // 2. edge_update_aggr
+    res_T edge_update_aggr[CONFIG_T::n_node][CONFIG_T::out_dim];
+    for(int i = 0; i < CONFIG_T::n_node; i++){
+      for(int j = 0; j < CONFIG_T::out_dim; j++){
+	    edge_update_aggr[i][j] = 0;
+      }
+    }
+
+    // intermediate: edge counter, only useful if we're taking a mean
+    index_T num_edge_per_node[CONFIG_T::n_node];
+    if(CONFIG_T::aggr==1){ //if aggregation-method is mean
+      for(int i=0; i<CONFIG_T::n_node; i++){
+        num_edge_per_node[i] = 0;
+      }
+    }
+
+    if(CONFIG_T::io_stream){
+      #pragma HLS STREAM variable=edge_index
+    }
+
+    #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
+    edge_loop: for(int i = 0; i < CONFIG_T::n_edge; i++) {
+      #pragma HLS UNROLL
+      index_T s = edge_index[i][0]; // 'x_j'
+      index_T r = edge_index[i][1]; // 'x_i'
+      if(CONFIG_T::aggr==1){ //if aggregation-method is mean
+        num_edge_per_node[r] += 1;
+      }
+
+      data_T node_concat[2*CONFIG_T::node_dim];
+      #pragma HLS ARRAY_PARTITION variable=l_logits complete dim=0
+      nnet::concatenate1d<data_T, data_T, data_T, typename CONFIG_T::merge_config1>(node_attr[r], node_attr[s], node_concat);
+      data_T phi_input[CONFIG_T::edge_dim + 2*CONFIG_T::node_dim];
+      #pragma HLS ARRAY_PARTITION variable=l complete dim=0
+      nnet::concatenate1d<data_T, data_T, data_T, typename CONFIG_T::merge_config2>(node_concat, edge_attr[i], phi_input);
+
+      if(CONFIG_T::activate_final){
+	    data_T edge_update_logits[CONFIG_T::out_dim];
+        #pragma HLS ARRAY_PARTITION variable=edge_update_logits complete dim=0
+        if(CONFIG_T::n_layers == 1){
+	      nnet::dense_mult_1lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update_logits, core_edge_w0, core_edge_b0);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config1>(edge_update_logits, edge_update[i]);
+        }
+        else if(CONFIG_T::n_layers == 2){
+	      nnet::dense_mult_2lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update_logits, core_edge_w0, core_edge_b0, core_edge_w1, core_edge_b1);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config2>(edge_update_logits, edge_update[i]);
+	    }
+	    else if(CONFIG_T::n_layers == 3){
+	      nnet::dense_mult_3lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update_logits, core_edge_w0, core_edge_b0, core_edge_w1, core_edge_b1, core_edge_w2, core_edge_b2);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config3>(edge_update_logits, edge_update[i]);
+	    }
+	    else if(CONFIG_T::n_layers == 4){
+	      nnet::dense_mult_4lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update_logits, core_edge_w0, core_edge_b0, core_edge_w1, core_edge_b1, core_edge_w2, core_edge_b2, core_edge_w3, core_edge_b3);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config4>(edge_update_logits, edge_update[i]);
+	    }
+      }
+      else{
+        if(CONFIG_T::n_layers == 1){
+	      nnet::dense_mult_1lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update[i], core_edge_w0, core_edge_b0);
+          }
+        else if(CONFIG_T::n_layers == 2){
+	      nnet::dense_mult_2lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update[i], core_edge_w0, core_edge_b0, core_edge_w1, core_edge_b1);
+        }
+        else if(CONFIG_T::n_layers == 3){
+	      nnet::dense_mult_3lyr<data_T, data_T, CONFIG_T>(phi_input, edge_update[i], core_edge_w0, core_edge_b0, core_edge_w1, core_edge_b1, core_edge_w2, core_edge_b2);
+        }
+        else if(CONFIG_T::n_layers == 4){
+	      nnet::dense_mult_4lyr<data_T, res_T, CONFIG_T>(phi_input, edge_update[i], core_edge_w0, core_edge_b0, core_edge_w1, core_edge_b1, core_edge_w2, core_edge_b2, core_edge_w3, core_edge_b3);
+        }
+      }
+
+      if((CONFIG_T::aggr==0)||(CONFIG_T::aggr==1)){ //if aggregation-method is "add" or "mean"
+        nnet::aggregate_single_edge_add<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+      }
+      else if(CONFIG_T::aggr==2){ //if aggregation-method is "max"
+        nnet::aggregate_single_edge_max<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+      }
+    }
+
+    if(CONFIG_T::aggr==1){ //if aggregation-method is "mean"
+      for(int i=0; i<CONFIG_T::n_node; i++){
+        if((num_edge_per_node[i] != 0)&&(num_edge_per_node[i] != 1)){
+          for (int j=0; j<CONFIG_T::out_dim; j++){
+            edge_update_aggr[i][j] = edge_update_aggr[i][j]/num_edge_per_node[i];
+            //edge_update_aggr[i][j] /= num_edge_per_node[i];
+          }
+        }
+      }
+    }
+
+    //output arrays --> output vectors
+    // 1. edge_update_1D
+    nnet::mat_to_vec<res_T, res_T, typename CONFIG_T::edge_update_config>(edge_update, edge_update_1D);
+
+    // 2. edge_update_aggr_1D
+    nnet::mat_to_vec<res_T, res_T, typename CONFIG_T::edge_update_aggr_config>(edge_update_aggr, edge_update_aggr_1D);
+  }
+
+  template<class data_T, class index_T, class res_T, typename CONFIG_T>
     void EdgeBlock_add(
             data_T    node_attr_1D[CONFIG_T::n_node*CONFIG_T::node_dim],
 			data_T    edge_attr_1D[CONFIG_T::n_edge*CONFIG_T::edge_dim],
