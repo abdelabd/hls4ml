@@ -1778,7 +1778,6 @@ class EdgeBlock(Layer):
         params['node_attr'] = self.attributes['inputs'][0]
         params['edge_attr'] = self.attributes['inputs'][1]
         params['edge_index'] = self.attributes['inputs'][2]
-        params['aggr'] = self.model.reader.torch_model.aggr
         params['L'] = f"layer{self.index}_out_L"
         params['Q'] = f"layer{self.index}_out_Q"
 
@@ -1885,6 +1884,16 @@ class EdgeBlock(Layer):
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
+
+        #get aggregation (haven't yet figured out how to pass string argument)
+        aggr_map = {
+            "add": 0,
+            "mean": 1,
+            "max": 2
+        }
+        aggr = aggr_map[self.model.reader.torch_model.aggr]
+        params['aggr'] = aggr
+
         return params
 
     def config_layer(self, layer_type, layer_params):
