@@ -260,7 +260,7 @@ namespace nnet {
       }
     }
 
-    // intermediate: edge counter, only useful if we're taking a mean
+    // intermediate: edge counter, only useful if aggr==mean
     index_T num_edge_per_node[CONFIG_T::n_node];
     if(CONFIG_T::aggr==1){ //if aggregation-method is mean
       for(int i=0; i<CONFIG_T::n_node; i++){
@@ -268,7 +268,7 @@ namespace nnet {
       }
     }
 
-    // intermediates: block_inputs and layer_outputs, only useful if we're saving intermediates
+    // intermediates: block_inputs and layer_outputs, only useful if save_intermediates==1
     data_T block_inputs[CONFIG_T::n_edge][CONFIG_T::edge_dim+2*CONFIG_T::node_dim];
     data_T fc1_out[CONFIG_T::n_edge][CONFIG_T::dense_config1::n_out];
     data_T relu1_out[CONFIG_T::n_edge][CONFIG_T::dense_config1::n_out];
@@ -283,8 +283,17 @@ namespace nnet {
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
     edge_loop: for(int i = 0; i < CONFIG_T::n_edge; i++) {
       #pragma HLS UNROLL
-      index_T s = edge_index[i][0]; // sender
-      index_T r = edge_index[i][1]; // receiver
+
+      index_T s;
+      index_T r;
+      if(CONFIG_T::flow==0){
+        s = edge_index[i][0]; // sender
+        r = edge_index[i][1]; // receiver
+      }
+      else{
+        s = edge_index[i][1]; // sender
+        r = edge_index[i][0]; // receiver
+      }
       if(CONFIG_T::aggr==1){ //if aggregation-method is mean
         num_edge_per_node[r] += 1;
       }

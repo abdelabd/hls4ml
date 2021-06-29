@@ -1886,14 +1886,18 @@ class EdgeBlock(Layer):
         params['n_zeros'] = 0
         params['save_intermediates'] = self.attributes['save_intermediates']
 
-        #get aggregation (haven't yet figured out how to pass string argument)
         aggr_map = {
             "add": 0,
             "mean": 1,
             "max": 2
         }
-        aggr = aggr_map[self.model.reader.torch_model.aggr]
-        params['aggr'] = aggr
+        params['aggr'] = aggr_map[self.model.reader.torch_model.aggr]
+
+        flow_map = {
+            "source_to_target": 0,
+            "target_to_source": 1
+        }
+        params["flow"] = flow_map[self.model.reader.torch_model.flow]
 
         return params
 
