@@ -1,6 +1,7 @@
 from __future__ import print_function
 from hls4ml.converters.pytorch_to_hls import PyTorchModelReader
 from hls4ml.utils.config import create_vivado_config
+from hls4ml.model.hls_layers import HLSType, IntegerPrecisionType, FixedPrecisionType
 import os
 
 class PygModelReader(PyTorchModelReader):
@@ -38,7 +39,7 @@ class PygModelReader(PyTorchModelReader):
 
         return data
 
-def pyg_to_hls(model, graph_dims):
+def pyg_to_hls(model, graph_dims, save_intermediates=False):
     n = graph_dims.get("n_node_max", 112)
     m = graph_dims.get("n_edge_max", 148)
     p = graph_dims.get("node_dim", 3)
@@ -85,7 +86,8 @@ def pyg_to_hls(model, graph_dims):
         'class_name': 'InputLayer',
         'input_shape': input_shapes['NodeAttr'],
         'inputs': 'input',
-        'dim_names': ['N_NODE', 'NODE_DIM']
+        'dim_names': ['N_NODE', 'NODE_DIM'],
+        'precision': FixedPrecisionType(width=32, integer=16)
     }
     layer_list.append(NodeAttr_layer)
 
@@ -94,7 +96,8 @@ def pyg_to_hls(model, graph_dims):
         'class_name': 'InputLayer',
         'input_shape': input_shapes['EdgeAttr'],
         'inputs': 'input',
-        'dim_names': ['N_EDGE', 'EDGE_DIM']
+        'dim_names': ['N_EDGE', 'EDGE_DIM'],
+        'precision': FixedPrecisionType(width=32, integer=16)
     }
     layer_list.append(EdgeAttr_layer)
 
@@ -103,7 +106,8 @@ def pyg_to_hls(model, graph_dims):
         'class_name': 'InputLayer',
         'input_shape': input_shapes['EdgeIndex'],
         'inputs': 'input',
-        'dim_names': ['TWO', 'N_EDGE']
+        'dim_names': ['TWO', 'N_EDGE'],
+        'precision': IntegerPrecisionType(width=16, signed=False)
     }
     layer_list.append(EdgeIndex_layer)
 
@@ -116,7 +120,9 @@ def pyg_to_hls(model, graph_dims):
         'edge_dim': q,
         'out_dim': q,
         'inputs': ['node_attr', 'edge_attr', 'edge_index'],
-        'outputs': ["layer4_out_L", "layer4_out_Q"]
+        'outputs': ["layer4_out_L", "layer4_out_Q"],
+        'save_intermediates': int(save_intermediates),
+        'precision': FixedPrecisionType(width=32, integer=16)
     }
     #layer_list.append(R1_layer)
 
@@ -129,7 +135,9 @@ def pyg_to_hls(model, graph_dims):
         'edge_dim': q,
         'out_dim': p,
         'inputs': ['node_attr', "layer4_out_Q"],
-        'outputs': ["layer5_out_P"]
+        'outputs': ["layer5_out_P"],
+        'save_intermediates': int(save_intermediates),
+        'precision': FixedPrecisionType(width=32, integer=16)
     }
     #layer_list.append(O_layer)
 
@@ -142,7 +150,9 @@ def pyg_to_hls(model, graph_dims):
         'edge_dim': q,
         'out_dim': 1,
         'inputs': ['layer5_out_P', 'layer4_out_L', 'edge_index'],
-        'outputs': ['layer6_out_L', 'layer6_out_Q']
+        'outputs': ['layer6_out_L', 'layer6_out_Q'],
+        'save_intermediates': int(save_intermediates),
+        'precision': FixedPrecisionType(width=32, integer=16)
     }
     #layer_list.append(R2_layer)
     block_layers = [R1_layer, O_layer, R2_layer]
