@@ -213,9 +213,18 @@ namespace nnet {
       for(int j=0; j<CONFIG_T::edge_dim; j++){
         #pragma HLS UNROLL
         edge_attr_aggr[j] = edge_attr_single[j] > edge_attr_aggr[j] ? edge_attr_single[j] : edge_attr_aggr[j];
-        //if(edge_attr_aggr[j] < edge_attr_single[j]){
-          //edge_attr_aggr[j] = edge_attr_single[j];
-        //}
+      }
+    }
+
+  template<class data_T, class res_T, typename CONFIG_T>
+    void replace_single_edge(
+      data_T edge_attr_single[CONFIG_T::edge_dim],
+      res_T  edge_attr_aggr[CONFIG_T::edge_dim]
+    )
+    {
+      for(int j=0; j<CONFIG_T::edge_dim; j++){
+        #pragma HLS UNROLL
+        edge_attr_aggr[j] = edge_attr_single[j];
       }
     }
 
@@ -287,7 +296,7 @@ namespace nnet {
         s = edge_index[i][1]; // sender
         r = edge_index[i][0]; // receiver
       }
-      if(CONFIG_T::aggr==1){ //if aggregation-method is mean
+      if((CONFIG_T::aggr==1)||(CONFIG_T::aggr==2)){ //if aggregation-method is mean or max
         num_edge_per_node[r] += 1;
       }
 
@@ -340,7 +349,12 @@ namespace nnet {
         nnet::aggregate_single_edge_add<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
       }
       else if(CONFIG_T::aggr==2){ //if aggregation-method is "max"
-        nnet::aggregate_single_edge_max<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+        if(num_edge_per_node[r] <= 1){
+          nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+        }
+        else{
+          nnet::aggregate_single_edge_max<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+        }
       }
     }
 
