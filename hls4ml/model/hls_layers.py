@@ -1884,7 +1884,6 @@ class EdgeBlock(Layer):
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
-        params['save_intermediates'] = self.attributes['save_intermediates']
 
         aggr_map = {
             "add": 0,
@@ -2202,7 +2201,6 @@ class NodeBlock(Layer):
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
-        params['save_intermediates'] = self.attributes['save_intermediates']
         return params
 
     def config_layer(self, layer_type, layer_params):

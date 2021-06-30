@@ -43,8 +43,7 @@ def pyg_to_hls(model, graph_dims,
                fixed_precision_bits=32,
                fixed_precision_int_bits=16,
                int_precision_bits=16,
-               int_precision_signed=False,
-               save_intermediates=False):
+               int_precision_signed=False):
 
     # get graph dimensions
     n = graph_dims.get("n_node_max", 112)
@@ -133,7 +132,6 @@ def pyg_to_hls(model, graph_dims,
         'out_dim': q,
         'inputs': ['node_attr', 'edge_attr', 'edge_index'],
         'outputs': ["layer4_out_L", "layer4_out_Q"],
-        'save_intermediates': int(save_intermediates),
         'precision': fp_type
     }
     #layer_list.append(R1_layer)
@@ -148,7 +146,6 @@ def pyg_to_hls(model, graph_dims,
         'out_dim': p,
         'inputs': ['node_attr', "layer4_out_Q"],
         'outputs': ["layer5_out_P"],
-        'save_intermediates': int(save_intermediates),
         'precision': fp_type
     }
     #layer_list.append(O_layer)
@@ -163,7 +160,6 @@ def pyg_to_hls(model, graph_dims,
         'out_dim': 1,
         'inputs': ['layer5_out_P', 'layer4_out_L', 'edge_index'],
         'outputs': ['layer6_out_L', 'layer6_out_Q'],
-        'save_intermediates': int(save_intermediates),
         'precision': fp_type
     }
     #layer_list.append(R2_layer)

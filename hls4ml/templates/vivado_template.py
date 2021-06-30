@@ -346,7 +346,6 @@ EdgeBlock_config_template = """struct config{index}: nnet::graph_config{{
     static const unsigned n_zeros = {n_zeros};
     static const bool io_stream = false; 
     static const bool activate_final = false;
-    static const unsigned save_intermediates = {save_intermediates};
 }};"""
 
 NodeBlock_config_template = """struct config{index}: nnet::graph_config{{
@@ -363,7 +362,6 @@ NodeBlock_config_template = """struct config{index}: nnet::graph_config{{
     static const unsigned n_zeros = {n_zeros};
     static const bool io_stream = false; 
     static const bool activate_final = false;
-    static const unsigned save_intermediates = {save_intermediates};
 }};"""
 
 
