@@ -1,8 +1,11 @@
 from __future__ import print_function
+import os
+
+import torch
 from hls4ml.converters.pytorch_to_hls import PyTorchModelReader
 from hls4ml.utils.config import create_vivado_config
 from hls4ml.model.hls_layers import HLSType, IntegerPrecisionType, FixedPrecisionType
-import os
+
 
 class PygModelReader(PyTorchModelReader):
 
@@ -39,7 +42,7 @@ class PygModelReader(PyTorchModelReader):
 
         return data
 
-def pyg_to_hls(model, graph_dims,
+def pyg_to_hls(model, forward_dict, graph_dims,
                fixed_precision_bits=32,
                fixed_precision_int_bits=16,
                int_precision_bits=16,
@@ -91,7 +94,6 @@ def pyg_to_hls(model, graph_dims,
     #make layer list
     layer_list = []
     input_shapes = reader.input_shape
-
     NodeAttr_layer = {
         'name': 'node_attr',
         'class_name': 'InputLayer',
@@ -101,7 +103,6 @@ def pyg_to_hls(model, graph_dims,
         'precision': fp_type
     }
     layer_list.append(NodeAttr_layer)
-
     EdgeAttr_layer = {
         'name': 'edge_attr',
         'class_name': 'InputLayer',
@@ -111,7 +112,6 @@ def pyg_to_hls(model, graph_dims,
         'precision': fp_type
     }
     layer_list.append(EdgeAttr_layer)
-
     EdgeIndex_layer = {
         'name': 'edge_index',
         'class_name': 'InputLayer',
@@ -122,49 +122,54 @@ def pyg_to_hls(model, graph_dims,
     }
     layer_list.append(EdgeIndex_layer)
 
-    R1_layer = {
-        'name': 'R1',
-        'class_name': 'EdgeBlock',
-        'n_node': n,
-        'n_edge': m,
-        'node_dim': p,
-        'edge_dim': q,
-        'out_dim': q,
-        'inputs': ['node_attr', 'edge_attr', 'edge_index'],
-        'outputs': ["layer4_out_L", "layer4_out_Q"],
-        'precision': fp_type
-    }
-    #layer_list.append(R1_layer)
+    # TODO: add aggregation layer if first layer is NodeBlock
+    
+    for key, val in forward_dict.items():
+        layer_dict = {
+            "name": key,
+            "class_name": val,
+            "n_node": n,
+            "n_edge": m,
+            "node_dim": p,
+            "edge_dim": q,
+            "precision": fp_type
+        }
 
-    O_layer = {
-        'name': 'O',
-        'class_name': 'NodeBlock',
-        'n_node': n,
-        'n_edge': m,
-        'node_dim': p,
-        'edge_dim': q,
-        'out_dim': p,
-        'inputs': ['node_attr', "layer4_out_Q"],
-        'outputs': ["layer5_out_P"],
-        'precision': fp_type
-    }
-    #layer_list.append(O_layer)
+        # get n_layers, out_dim
+        torch_block = getattr(model, key)
+        try:
+            torch_layers = torch_block.layers._modules
+        except AttributeError:
+            torch_layers = torch_block._modules
 
-    R2_layer = {
-        'name': 'R2',
-        'class_name': 'EdgeBlock',
-        'n_node': n,
-        'n_edge': m,
-        'node_dim': p,
-        'edge_dim': q,
-        'out_dim': 1,
-        'inputs': ['layer5_out_P', 'layer4_out_L', 'edge_index'],
-        'outputs': ['layer6_out_L', 'layer6_out_Q'],
-        'precision': fp_type
-    }
-    #layer_list.append(R2_layer)
-    block_layers = [R1_layer, O_layer, R2_layer]
-    for l in block_layers: layer_list.append(l)
+        lcount = 0
+        for lname, l in torch_layers.items():
+            if isinstance(l, torch.nn.modules.linear.Linear):
+                lcount += 1
+                last_layer = l
+        layer_dict["n_layers"] = lcount
+        layer_dict["out_dim"] = last_layer.out_features
+
+        # get inputs, outputs
+        index = len(layer_list)+1
+        last_node_update = "node_attr"
+        last_edge_update = "edge_attr"
+        last_edge_update_aggr = "edge_attr_aggr"
+        for l in layer_list:
+            if l["class_name"] == "NodeBlock":
+                last_node_update = l["outputs"][0]
+            elif l["class_name"] == "EdgeBlock":
+                last_edge_update = l["outputs"][0]
+                last_edge_update_aggr = l["outputs"][1]
+
+        if val=="NodeBlock":
+            layer_dict["inputs"] = [last_node_update, last_edge_update_aggr]
+            layer_dict["outputs"] = [f"layer{index}_out_P"]
+        elif val=="EdgeBlock":
+            layer_dict["inputs"] = [last_node_update, last_edge_update, "edge_index"]
+            layer_dict["outputs"] = [f"layer{index}_out_L", f"layer{index}_out_Q"]
+
+        layer_list.append(layer_dict)
 
     return config, reader, layer_list
 

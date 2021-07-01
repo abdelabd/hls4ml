@@ -1730,7 +1730,95 @@ class GarNetStack(GarNet):
 
         params['sublayer_configs'] = '\n'.join(sublayer_configs)
 
-class EdgeBlock(Layer):
+class GraphBlock(Layer): #parent class for EdgeBlock, NodeBlock
+    def add_weights(self, quantizer=None, compression=False):
+        linear_count = 0
+
+        for name, module in self.submodules.items():
+            if module.__class__.__name__ == 'Linear':
+                data = self.model.get_weights_data(self.name, name, 'kernel').transpose()
+                var_name = f"{self.name}_w{linear_count}"
+                self.add_weights_variable(name=var_name, var_name=var_name, data=data, quantizer=quantizer,
+                                              compression=compression)
+                linear_count += 1
+
+        # DUMMIES
+        if linear_count <= 3:
+            for i in range(linear_count, 4):
+                self.add_weights_variable(name=f"{self.name}_w{i}", var_name=f"{self.name}_w{i}", data=data,
+                                              quantizer=quantizer, compression=compression)
+
+    def add_bias(self, quantizer=None):
+        precision = None
+        type_name = None
+        linear_count = 0
+
+        for name, module in self.submodules.items():
+            if module.__class__.__name__ == 'Linear':
+                data = self.model.get_weights_data(self.name, name, 'bias')
+                var_name = f"{self.name}_b{linear_count}"
+                self.add_weights_variable(name=var_name, var_name=var_name, type_name=type_name, precision=precision,
+                                              data=data, quantizer=quantizer)
+                linear_count += 1
+
+        # DUMMIES
+        if linear_count <= 3:
+            for i in range(linear_count, 4):
+                self.add_weights_variable(name=f"{self.name}_b{i}", var_name=f"{self.name}_b{i}", type_name=type_name,
+                                              precision=precision, data=data, quantizer=quantizer)
+
+    def get_dense_params(self, dense_layer, linear_count):  # hard-coded for now
+        params = {}
+        params['type'] = 'dense'
+        params['index'] = linear_count
+        params['n_in'] = dense_layer.in_features
+        params['n_out'] = dense_layer.out_features
+        params['iotype'] = 'io_parallel'
+        params['reuse'] = 1
+        params['nzeros'] = 0
+        params['accum_t'] = 'ap_fixed<32,16>'
+        params['bias_t'] = 'ap_fixed<16,6>'
+        params['weight_t'] = 'ap_fixed<16,6>'
+        return params
+
+    def get_relu_params(self, relu_count, last_n_out):  # hard-coded for now
+        params = {}
+        params['type'] = 'relu'
+        params['index'] = relu_count
+        params['n_in'] = last_n_out
+        params['table_size'] = 1024
+        params['iotype'] = 'io_parallel'
+        return params
+
+    def config_layer(self, layer_type, layer_params):
+        all_lines = self.model.config.backend.get_config_template(layer_type).split('\n')
+        all_lines[0] = re.sub('struct config{index}', 'struct {type}_config{index}', all_lines[0])
+        param_lines = []
+        out = []
+
+        for param in layer_params:
+            p_lines = [i for i in all_lines if "{%s}" % param in i]
+            if len(p_lines) == 1 and p_lines[0] not in param_lines:
+                param_lines.append(p_lines[0])
+            elif len(p_lines) < 1:
+                print(f"param {param} not found in {layer_type} config template")
+            else:
+                pass
+
+        for line in all_lines:
+            if line in param_lines:
+                out.append(line)
+            else:
+                param_search = line.find('{')
+                if param_search == -1:
+                    if 'template' not in line:
+                        out.append(line)
+
+        out = '\n'.join(out)
+        out = out.format(**layer_params)
+        return out
+
+class EdgeBlock(GraphBlock):
     def initialize(self):
         assert (len(self.inputs) == 3)  # edge_features, node_features, edge_index
         assert (len(self.outputs) == 2)  # edge_predictions, aggregated node_predictions
@@ -1810,68 +1898,8 @@ class EdgeBlock(Layer):
         top_config += '\n};'
         return top_config
 
-    def add_weights(self, quantizer=None, compression=False):
-        linear_count = 0
-
-        for name, module in self.submodules.items():
-            if module.__class__.__name__ == 'Linear':
-                data = self.model.get_weights_data(self.name, name, 'kernel').transpose()
-                var_name = f"{self.name}_w{linear_count}"
-                self.add_weights_variable(name=var_name, var_name=var_name, data=data, quantizer=quantizer,
-                                              compression=compression)
-                linear_count += 1
-
-        # DUMMIES
-        if linear_count <= 3:
-            for i in range(linear_count, 4):
-                self.add_weights_variable(name=f"{self.name}_w{i}", var_name=f"{self.name}_w{i}", data=data,
-                                              quantizer=quantizer, compression=compression)
-
-    def add_bias(self, quantizer=None):
-        precision = None
-        type_name = None
-        linear_count = 0
-
-        for name, module in self.submodules.items():
-            if module.__class__.__name__ == 'Linear':
-                data = self.model.get_weights_data(self.name, name, 'bias')
-                var_name = f"{self.name}_b{linear_count}"
-                self.add_weights_variable(name=var_name, var_name=var_name, type_name=type_name, precision=precision,
-                                              data=data, quantizer=quantizer)
-                linear_count += 1
-
-        # DUMMIES
-        if linear_count <= 3:
-            for i in range(linear_count, 4):
-                self.add_weights_variable(name=f"{self.name}_b{i}", var_name=f"{self.name}_b{i}", type_name=type_name,
-                                              precision=precision, data=data, quantizer=quantizer)
-
-    def get_dense_params(self, dense_layer, linear_count):  # hard-coded for now
-        params = {}
-        params['type'] = 'dense'
-        params['index'] = linear_count
-        params['n_in'] = dense_layer.in_features
-        params['n_out'] = dense_layer.out_features
-        params['iotype'] = 'io_parallel'
-        params['reuse'] = 1
-        params['nzeros'] = 0
-        params['accum_t'] = 'ap_fixed<32,16>'
-        params['bias_t'] = 'ap_fixed<16,6>'
-        params['weight_t'] = 'ap_fixed<16,6>'
-        return params
-
-    def get_relu_params(self, relu_count, last_n_out):  # hard-coded for now
-        params = {}
-        params['type'] = 'relu'
-        params['index'] = relu_count
-        params['n_in'] = last_n_out
-        params['table_size'] = 1024
-        params['iotype'] = 'io_parallel'
-        return params
-
     def get_EdgeBlock_params(self):  # hard-coded for now
         params = {}
-        params['type'] = 'edgeblock'
         params['index'] = self.index
         params['bias_t'] = 'ap_fixed<16,6>'
         params['weight_t'] = 'ap_fixed<16,6>'
@@ -1880,13 +1908,14 @@ class EdgeBlock(Layer):
         params['node_dim'] = self.node_dim_cppname
         params['edge_dim'] = self.edge_dim_cppname
         params['out_dim'] = self.out_dim
-        params['n_layers'] = 3
+        params['n_layers'] = self.attributes["n_layers"]
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
 
         aggr_map = {
             "add": 0,
+            "sum": 0,
             "mean": 1,
             "max": 2
         }
@@ -1899,33 +1928,6 @@ class EdgeBlock(Layer):
         params["flow"] = flow_map[self.model.reader.torch_model.flow]
 
         return params
-
-    def config_layer(self, layer_type, layer_params):
-        all_lines = self.model.config.backend.get_config_template(layer_type).split('\n')
-        all_lines[0] = re.sub('struct config{index}', 'struct {type}_config{index}', all_lines[0])
-        param_lines = []
-        out = []
-
-        for param in layer_params:
-            p_lines = [i for i in all_lines if "{%s}" % param in i]
-            if len(p_lines) == 1 and p_lines[0] not in param_lines:
-                param_lines.append(p_lines[0])
-            elif len(p_lines) < 1:
-                print(f"param {param} not found in {layer_type} config template")
-            else: pass
-
-        for line in all_lines:
-            if line in param_lines:
-                out.append(line)
-            else:
-                param_search = line.find('{')
-                if param_search == -1:
-                    if 'template' not in line:
-                        out.append(line)
-
-        out = '\n'.join(out)
-        out = out.format(**layer_params)
-        return out
 
     def _config_sublayers(self):
         linear_count = 0
@@ -2052,7 +2054,7 @@ class EdgeBlock(Layer):
 
         return configs
 
-class NodeBlock(Layer):
+class NodeBlock(GraphBlock):
     def initialize(self):
         assert (len(self.inputs) == 2)  # node_features, per-node-aggregated edge_features
         assert (len(self.outputs) == 1)  # node_predictions
@@ -2127,68 +2129,8 @@ class NodeBlock(Layer):
         top_config += '\n};'
         return top_config
 
-    def add_weights(self, quantizer=None, compression=False):
-        linear_count = 0
-
-        for name, module in self.submodules.items():
-            if module.__class__.__name__ == 'Linear':
-                data = self.model.get_weights_data(self.name, name, 'kernel').transpose()
-                var_name = f"{self.name}_w{linear_count}"
-                self.add_weights_variable(name=var_name, var_name=var_name, data=data, quantizer=quantizer,
-                                              compression=compression)
-                linear_count += 1
-
-        # DUMMIES
-        if linear_count <= 3:
-            for i in range(linear_count, 4):
-                self.add_weights_variable(name=f"{self.name}_w{i}", var_name=f"{self.name}_w{i}", data=data,
-                                              quantizer=quantizer, compression=compression)
-
-    def add_bias(self, quantizer=None):
-        precision = None
-        type_name = None
-        linear_count = 0
-
-        for name, module in self.submodules.items():
-            if module.__class__.__name__ == 'Linear':
-                data = self.model.get_weights_data(self.name, name, 'bias')
-                var_name = f"{self.name}_b{linear_count}"
-                self.add_weights_variable(name=var_name, var_name=var_name, type_name=type_name, precision=precision,
-                                              data=data, quantizer=quantizer)
-                linear_count += 1
-
-        # DUMMIES
-        if linear_count <= 3:
-            for i in range(linear_count, 4):
-                self.add_weights_variable(name=f"{self.name}_b{i}", var_name=f"{self.name}_b{i}", type_name=type_name,
-                                              precision=precision, data=data, quantizer=quantizer)
-
-    def get_dense_params(self, dense_layer, linear_count):  # hard-coded for now
-        params = {}
-        params['type'] = 'dense'
-        params['index'] = linear_count
-        params['n_in'] = dense_layer.in_features
-        params['n_out'] = dense_layer.out_features
-        params['iotype'] = 'io_parallel'
-        params['reuse'] = 1
-        params['nzeros'] = 0
-        params['accum_t'] = 'ap_fixed<32,16>'
-        params['bias_t'] = 'ap_fixed<16,6>'
-        params['weight_t'] = 'ap_fixed<16,6>'
-        return params
-
-    def get_relu_params(self, relu_count, last_n_out):  # hard-coded for now
-        params = {}
-        params['type'] = 'relu'
-        params['index'] = relu_count
-        params['n_in'] = last_n_out
-        params['table_size'] = 1024
-        params['iotype'] = 'io_parallel'
-        return params
-
     def get_NodeBlock_params(self):  # hard-coded for now
         params = {}
-        params['type'] = 'nodeblock'
         params['index'] = self.index
         params['bias_t'] = 'ap_fixed<16,6>'
         params['weight_t'] = 'ap_fixed<16,6>'
@@ -2197,43 +2139,11 @@ class NodeBlock(Layer):
         params['node_dim'] = self.node_dim_cppname
         params['edge_dim'] = self.edge_dim_cppname
         params['out_dim'] = self.out_dim
-        params['n_layers'] = 3
+        params['n_layers'] = self.attributes["n_layers"]
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
         return params
-
-    def config_layer(self, layer_type, layer_params):
-        if layer_type == 'NodeBlock':
-            all_lines = self._function_template.split('\n')
-        else:
-            all_lines = self.model.config.backend.get_config_template(layer_type).split('\n')
-
-        all_lines[0] = re.sub('struct config{index}', 'struct {type}_config{index}', all_lines[0])
-        param_lines = []
-        out = []
-
-        for param in layer_params:
-            p_lines = [i for i in all_lines if "{%s}" % param in i]
-            if len(p_lines) == 1 and p_lines[0] not in param_lines:
-                param_lines.append(p_lines[0])
-            elif len(p_lines) < 1:
-                print(f"param {param} not found in {layer_type} config template")
-            else:
-                pass
-
-        for line in all_lines:
-            if line in param_lines:
-                out.append(line)
-            else:
-                param_search = line.find('{')
-                if param_search == -1:
-                    if 'template' not in line:
-                        out.append(line)
-
-        out = '\n'.join(out)
-        out = out.format(**layer_params)
-        return out
 
     def _config_sublayers(self):
         linear_count = 0
@@ -2317,6 +2227,7 @@ class NodeBlock(Layer):
         configs['node_update_config'] = matrix_config_template.format(**node_update_params)
 
         return configs
+
     
 layer_map = {
     'Input'                  : Input,
