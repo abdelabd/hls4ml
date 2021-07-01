@@ -245,60 +245,49 @@ namespace nnet {
 			typename CONFIG_T::dense_config4::bias_t    core_edge_b3[CONFIG_T::dense_config4::n_out])
   {
     //initialize arrays
-
-    // 1. node_attr
+    // 1. node_attr (input)
     data_T node_attr[CONFIG_T::n_node][CONFIG_T::node_dim];
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::node_attr_config>(node_attr_1D, node_attr);
 
-    // 2. edge_attr
+    // 2. edge_attr (input)
     data_T edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim];
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_config>(edge_attr_1D, edge_attr);
 
-    // 3. edge_index
+    // 3. edge_index (input)
     index_T edge_index[CONFIG_T::n_edge][2];
     nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
-
-    // 4. edge_update
-    res_T edge_update[CONFIG_T::n_edge][CONFIG_T::out_dim];
-
-    // 5. edge_update_aggr
-    res_T edge_update_aggr[CONFIG_T::n_node][CONFIG_T::out_dim];
-    for(int i = 0; i < CONFIG_T::n_node; i++){
-      for(int j = 0; j < CONFIG_T::out_dim; j++){
-	    edge_update_aggr[i][j] = 0;
-      }
-    }
-
-    // 6. edge counter (only useful if aggr==mean)
-    index_T num_edge_per_node[CONFIG_T::n_node];
-    if(CONFIG_T::aggr==1){ //if aggregation-method is mean
-      for(int i=0; i<CONFIG_T::n_node; i++){
-        num_edge_per_node[i] = 0;
-      }
-    }
-
     if(CONFIG_T::io_stream){
       #pragma HLS STREAM variable=edge_index
     }
+
+    // 4. num_edge_per_node (intermediate)
+    index_T num_edge_per_node[CONFIG_T::n_node];
+    for(int i=0; i<CONFIG_T::n_node; i++){
+        num_edge_per_node[i] = 0;
+    }
+
+    // 5. edge_update (output)
+    res_T edge_update[CONFIG_T::n_edge][CONFIG_T::out_dim];
+
+    // 6. edge_update_aggr (output)
+    res_T edge_update_aggr[CONFIG_T::n_node][CONFIG_T::out_dim];
 
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
     edge_loop: for(int i = 0; i < CONFIG_T::n_edge; i++) { //for each edge
       #pragma HLS UNROLL
 
-      // get sender, receiver nodes
+      // get sender, receiver indices
       index_T s;
       index_T r;
-      if(CONFIG_T::flow==0){ //'source_to_target'
-        s = edge_index[i][0]; // sender
-        r = edge_index[i][1]; // receiver
+      if(CONFIG_T::flow==0){ //flow='source_to_target'
+        s = edge_index[i][0];
+        r = edge_index[i][1];
       }
-      else{ //'target_to_source'
-        s = edge_index[i][1]; // sender
-        r = edge_index[i][0]; // receiver
+      else{ //flow='target_to_source'
+        s = edge_index[i][1];
+        r = edge_index[i][0];
       }
-      if((CONFIG_T::aggr==1)||(CONFIG_T::aggr==2)){ //if aggregation-method is mean or max
-        num_edge_per_node[r] += 1;
-      }
+      num_edge_per_node[r] += 1;
 
       // construct NN input: <receiver, sender, edge>
       data_T node_concat[2*CONFIG_T::node_dim];
@@ -345,26 +334,31 @@ namespace nnet {
       }
 
       // aggregation step
-      if((CONFIG_T::aggr==0)||(CONFIG_T::aggr==1)){ //if aggregation-method is "add" or "mean"
-        nnet::aggregate_single_edge_add<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+      if(num_edge_per_node[r] <= 1){ //if this is the first edge sent to that index, there's nothing to aggregate with
+        nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
       }
-      else if(CONFIG_T::aggr==2){ //if aggregation-method is "max"
-        if(num_edge_per_node[r] <= 1){
-          nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+      else{
+        if((CONFIG_T::aggr==0)||(CONFIG_T::aggr==1)){ //aggr="add" or "mean"
+          nnet::aggregate_single_edge_add<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
         }
-        else{
+        else if(CONFIG_T::aggr==2){ //aggr="max"
           nnet::aggregate_single_edge_max<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
         }
       }
     }
 
-    // extra step for mean-aggregation
-    if(CONFIG_T::aggr==1){ //if aggregation-method is "mean"
-      for(int i=0; i<CONFIG_T::n_node; i++){
-        if(num_edge_per_node[i] > 1){
-          for (int j=0; j<CONFIG_T::out_dim; j++){
+    // taking care of edge_update_aggr
+    res_T zeros[CONFIG_T::out_dim];
+    for(int j=0; j<CONFIG_T::out_dim; j++){
+          zeros[j]=0;
+    }
+    for(int i=0; i < CONFIG_T::n_node; i++){
+      if(num_edge_per_node[i] < 1){ //disconnected nodes should have zeros in place of their edge_attr_aggr
+        nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(zeros, edge_update_aggr[i]);
+      }
+      else if(CONFIG_T::aggr==1){ //if aggregation-method is "mean", we have to divide by the number of edges
+        for (int j=0; j<CONFIG_T::out_dim; j++){
             edge_update_aggr[i][j] = edge_update_aggr[i][j]/num_edge_per_node[i];
-          }
         }
       }
     }
@@ -393,54 +387,59 @@ namespace nnet {
 			typename CONFIG_T::dense_config4::bias_t    core_node_b3[CONFIG_T::dense_config4::n_out])
   {
     //initialize arrays
-
-    //1. node_attr
+    //1. node_attr (input)
     data_T node_attr[CONFIG_T::n_node][CONFIG_T::node_dim];
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::node_attr_config>(node_attr_1D, node_attr);
 
-    //2. edge_attr_aggr
+    //2. edge_attr_aggr (input)
     data_T edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim];
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_aggr_config>(edge_attr_aggr_1D, edge_attr_aggr);
 
-    // 3. node_update
+    // 3. node_update (output)
     res_T node_update[CONFIG_T::n_node][CONFIG_T::out_dim];
 
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
-
     node_loop: for(int i = 0; i < CONFIG_T::n_node; i++){ //for each node
       #pragma HLS UNROLL
 
-      // construct NN input: <node, edge_aggr>
+      // construct NN input: <node, edge_attr_aggr>
       data_T phi_input[CONFIG_T::edge_dim + CONFIG_T::node_dim];
       #pragma HLS ARRAY_PARTITION variable=p complete dim=0
       nnet::concatenate1d<data_T, data_T, data_T, typename CONFIG_T::merge_config1>(node_attr[i], edge_attr_aggr[i], phi_input);
 
       // send it through NN
       if(CONFIG_T::activate_final){
-	data_T node_update_logits[CONFIG_T::node_dim];
-	#pragma HLS ARRAY_PARTITION variable=node_update_logits complete dim=0
-	if(CONFIG_T::n_layers == 1){
-	  nnet::dense_mult_1lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0);
-	  nnet::relu<data_T, res_T, typename CONFIG_T::relu_config1>(node_update_logits, node_update[i]);
-	}else if(CONFIG_T::n_layers == 2){
-	  nnet::dense_mult_2lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1);
-	  nnet::relu<data_T, res_T, typename CONFIG_T::relu_config2>(node_update_logits, node_update[i]);
-	}else if(CONFIG_T::n_layers == 3){
-	  nnet::dense_mult_3lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2);
-	  nnet::relu<data_T, res_T, typename CONFIG_T::relu_config3>(node_update_logits, node_update[i]);
-	}else if(CONFIG_T::n_layers == 4){
-	  nnet::dense_mult_4lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2, core_node_w3, core_node_b3);
-	  nnet::relu<data_T, res_T, typename CONFIG_T::relu_config4>(node_update_logits, node_update[i]);
-	}
-      }else{
+	    data_T node_update_logits[CONFIG_T::node_dim];
+	    #pragma HLS ARRAY_PARTITION variable=node_update_logits complete dim=0
+	    if(CONFIG_T::n_layers == 1){
+	      nnet::dense_mult_1lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config1>(node_update_logits, node_update[i]);
+	    }
+	    else if(CONFIG_T::n_layers == 2){
+	      nnet::dense_mult_2lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config2>(node_update_logits, node_update[i]);
+	    }
+	    else if(CONFIG_T::n_layers == 3){
+	      nnet::dense_mult_3lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config3>(node_update_logits, node_update[i]);
+	    }
+	    else if(CONFIG_T::n_layers == 4){
+	      nnet::dense_mult_4lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2, core_node_w3, core_node_b3);
+	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config4>(node_update_logits, node_update[i]);
+	    }
+      }
+      else{
         if(CONFIG_T::n_layers == 1){
-	  nnet::dense_mult_1lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0);
-        }else if(CONFIG_T::n_layers == 2){
-	  nnet::dense_mult_2lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1);
-        }else if(CONFIG_T::n_layers == 3){
-	  nnet::dense_mult_3lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2);
-        }else if(CONFIG_T::n_layers == 4){
-	  nnet::dense_mult_4lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2, core_node_w3, core_node_b3);
+	      nnet::dense_mult_1lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0);
+        }
+        else if(CONFIG_T::n_layers == 2){
+	      nnet::dense_mult_2lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1);
+        }
+        else if(CONFIG_T::n_layers == 3){
+	      nnet::dense_mult_3lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2);
+        }
+        else if(CONFIG_T::n_layers == 4){
+	      nnet::dense_mult_4lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2, core_node_w3, core_node_b3);
         }
       }
     }
