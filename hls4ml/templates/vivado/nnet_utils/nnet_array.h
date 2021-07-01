@@ -48,7 +48,9 @@ void vec_to_mat( //faster (I think)
 ) {
     int i=0;
     for (int r=0; r < CONFIG_T::n_rows; r++){
+      #pragma HLS UNROLL
       for (int c=0; c < CONFIG_T::n_cols; c++){
+        #pragma HLS UNROLL
         mat[r][c] = vec[i];
         i += 1;
       }
@@ -62,9 +64,11 @@ void mat_to_vec( //faster (I think)
 ) {
     int i=0;
     for (int r=0; r < CONFIG_T::n_rows; r++){
+      #pragma HLS UNROLL
       for (int c=0; c<CONFIG_T::n_cols; c++){
-      vec[i] = mat[r][c];
-      i += 1;
+        #pragma HLS UNROLL
+        vec[i] = mat[r][c];
+        i += 1;
       }
     }
 }

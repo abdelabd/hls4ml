@@ -60,7 +60,7 @@ def pyg_to_hls(model, graph_dims,
     config = {
         "output_dir": os.getcwd() + "/hls_output",
         "project_name": "myproject",
-        "fpga_part": 'xcu250-figd2104-2L-e',
+        "fpga_part": 'xcku115-flvb2104-2-i',
         "clock_period": 5,
         "io_type": "io_parallel",
     }

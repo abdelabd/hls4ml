@@ -291,10 +291,10 @@ namespace nnet {
 
       // construct NN input: <receiver, sender, edge>
       data_T node_concat[2*CONFIG_T::node_dim];
-      #pragma HLS ARRAY_PARTITION variable=l_logits complete dim=0
+      #pragma HLS ARRAY_PARTITION variable=node_concat complete dim=0
       nnet::concatenate1d<data_T, data_T, data_T, typename CONFIG_T::merge_config1>(node_attr[r], node_attr[s], node_concat);
       data_T phi_input[CONFIG_T::edge_dim + 2*CONFIG_T::node_dim];
-      #pragma HLS ARRAY_PARTITION variable=l complete dim=0
+      #pragma HLS ARRAY_PARTITION variable=phi_input complete dim=0
       nnet::concatenate1d<data_T, data_T, data_T, typename CONFIG_T::merge_config2>(node_concat, edge_attr[i], phi_input);
 
       // send it through NN
@@ -404,7 +404,7 @@ namespace nnet {
 
       // construct NN input: <node, edge_attr_aggr>
       data_T phi_input[CONFIG_T::edge_dim + CONFIG_T::node_dim];
-      #pragma HLS ARRAY_PARTITION variable=p complete dim=0
+      #pragma HLS ARRAY_PARTITION variable=phi_input complete dim=0
       nnet::concatenate1d<data_T, data_T, data_T, typename CONFIG_T::merge_config1>(node_attr[i], edge_attr_aggr[i], phi_input);
 
       // send it through NN
