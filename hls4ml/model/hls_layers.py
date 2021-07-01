@@ -5,7 +5,6 @@ import sys
 import re
 import numpy as np
 from collections import OrderedDict
-import torch
 
 class Quantizer(object):
     def __init__(self, bits, hls_type):
@@ -1781,7 +1780,7 @@ class GraphBlock(Layer): #parent class for EdgeBlock, NodeBlock
         params['weight_t'] = 'ap_fixed<16,6>'
         return params
 
-    def get_relu_params(self, relu_count, last_n_out):  # hard-coded for now
+    def get_relu_params(self, relu_count, last_n_out):
         params = {}
         params['type'] = 'relu'
         params['index'] = relu_count
@@ -1817,6 +1816,46 @@ class GraphBlock(Layer): #parent class for EdgeBlock, NodeBlock
         out = '\n'.join(out)
         out = out.format(**layer_params)
         return out
+
+    def _config_sublayers(self):
+        linear_count = 0
+        relu_count = 0
+        configs = OrderedDict()
+
+        for name, module in self.submodules.items():
+            if name == '':
+                continue
+
+            if module.__class__.__name__ == "Linear":
+                linear_count += 1
+                linear_params = self.get_dense_params(module, linear_count)
+                linear_config = self.config_layer('Dense', linear_params)
+                configs[f"dense_config{linear_count}"] = linear_config
+                last_n_out = linear_params['n_out']
+
+            elif module.__class__.__name__ == "ReLU":
+                relu_count += 1
+                relu_params = self.get_relu_params(relu_count, last_n_out)
+                relu_config = self.config_layer('Activation', relu_params)
+                configs[f"relu_config{relu_count}"] = relu_config
+                last_n_out = relu_params['n_in']
+
+        # DUMMIES
+        if linear_count < 4:
+            for i in range(linear_count + 1, 5):
+                linear_config_i = linear_config.split('\n')
+                linear_config_i[0] = re.sub(f"dense_config{linear_count}", f"dense_config{i}", linear_config_i[0])
+                linear_config_i = "\n".join(linear_config_i)
+                configs[f"dense_config{i}"] = linear_config_i
+
+        if relu_count < 4:
+            for i in range(relu_count + 1, 5):
+                relu_config_i = relu_config.split('\n')
+                relu_config_i[0] = re.sub(f"relu_config{relu_count}", f"relu_config{i}", relu_config_i[0])
+                relu_config_i = '\n'.join(relu_config_i)
+                configs[f"relu_config{i}"] = relu_config_i
+
+        return configs
 
 class EdgeBlock(GraphBlock):
     def initialize(self):
@@ -1888,6 +1927,7 @@ class EdgeBlock(GraphBlock):
         top_config = '\n'.join(top_config)
 
         sublayer_configs = self._config_sublayers()
+        sublayer_configs.update(self._config_misc())
         for layer, config in sublayer_configs.items():
             config = ['    ' + i for i in config.split('\n')]
             config = '\n'.join(config)
@@ -1919,55 +1959,46 @@ class EdgeBlock(GraphBlock):
             "mean": 1,
             "max": 2
         }
-        params['aggr'] = aggr_map[self.model.reader.torch_model.aggr]
+        params['aggr'] = aggr_map[self.attributes.get("aggr", self.model.reader.torch_model.aggr)]
 
         flow_map = {
             "source_to_target": 0,
             "target_to_source": 1
         }
-        params["flow"] = flow_map[self.model.reader.torch_model.flow]
+        params["flow"] = flow_map[self.attributes.get("flow", self.model.reader.torch_model.flow)]
 
         return params
 
-    def _config_sublayers(self):
-        linear_count = 0
-        relu_count = 0
+    def _config_misc(self):
         configs = OrderedDict()
 
-        for name, module in self.submodules.items():
-            if name == '':
-                continue
+        # matrix configs
+        matrix_config_template = """struct {matrix_name}_config: nnet::matrix_config{{
+                    static const unsigned n_rows = {n_rows};
+                    static const unsigned n_cols = {n_cols};
+                }};"""
 
-            if isinstance(module, torch.nn.modules.linear.Linear):
-                linear_count += 1
-                linear_params = self.get_dense_params(module, linear_count)
-                linear_config = self.config_layer('Dense', linear_params)
-                configs[f"dense_config{linear_count}"] = linear_config
-                last_n_out = linear_params['n_out']
+        configs['node_attr_config'] = matrix_config_template.format(matrix_name="node_attr",
+                                                                    n_rows=self.n_node_cppname,
+                                                                    n_cols=self.node_dim_cppname)
 
-            elif isinstance(module, torch.nn.modules.activation.ReLU):
-                relu_count += 1
-                relu_params = self.get_relu_params(relu_count, last_n_out)
-                relu_config = self.config_layer('Activation', relu_params)
-                configs[f"relu_config{relu_count}"] = relu_config
-                last_n_out = relu_params['n_in']
+        configs['edge_attr_config'] = matrix_config_template.format(matrix_name="edge_attr",
+                                                                    n_rows=self.n_edge_cppname,
+                                                                    n_cols=self.edge_dim_cppname)
 
-        # DUMMIES
-        if linear_count < 4:
-            for i in range(linear_count + 1, 5):
-                linear_config_i = linear_config.split('\n')
-                linear_config_i[0] = re.sub(f"dense_config{linear_count}", f"dense_config{i}", linear_config_i[0])
-                linear_config_i = "\n".join(linear_config_i)
-                configs[f"dense_config{i}"] = linear_config_i
+        configs['edge_index_config'] = matrix_config_template.format(matrix_name="edge_index",
+                                                                     n_rows=self.n_edge_cppname,
+                                                                     n_cols="TWO")
 
-        if relu_count < 4:
-            for i in range(relu_count+1, 5):
-                relu_config_i = relu_config.split('\n')
-                relu_config_i[0] = re.sub(f"relu_config{relu_count}", f"relu_config{i}", relu_config_i[0])
-                relu_config_i = '\n'.join(relu_config_i)
-                configs[f"relu_config{i}"] = relu_config_i
+        configs['edge_update_config'] = matrix_config_template.format(matrix_name="edge_update",
+                                                                      n_rows=self.n_edge_cppname,
+                                                                      n_cols=f"LAYER{self.index}_OUT_DIM")
 
-        # merge configs
+        configs['edge_update_aggr_config'] = matrix_config_template.format(matrix_name="edge_update_aggr",
+                                                                           n_rows=self.n_node_cppname,
+                                                                           n_cols=f"LAYER{self.index}_OUT_DIM")
+
+        # concatenation configs
         concat_config_template = self.model.config.backend.get_config_template('Concatenate')
         concat_config_template = re.sub('config{index}', 'merge_config{index}', concat_config_template)
 
@@ -1997,60 +2028,19 @@ class EdgeBlock(GraphBlock):
         merge_config2 = concat_config_template.format(**merge_config2_params)
         configs['merge_config2'] = merge_config2
 
-        # mat_to_vec, vec_to_mat configs
-        matrix_config_template = """struct {matrix_name}_config: nnet::matrix_config{{
-            static const unsigned n_rows = {n_rows};
-            static const unsigned n_cols = {n_cols};
-        }};"""
-
-        node_attr_params = {
-            'matrix_name': 'node_attr',
-            'n_rows': self.n_node_cppname,
-            'n_cols': self.node_dim_cppname
-        }
-        configs['node_attr_config'] = matrix_config_template.format(**node_attr_params)
-
-        edge_attr_params = {
-            'matrix_name': 'edge_attr',
-            'n_rows': self.n_edge_cppname,
-            'n_cols': self.edge_dim_cppname
-        }
-        configs['edge_attr_config'] = matrix_config_template.format(**edge_attr_params)
-
-        edge_index_params = {
-            'matrix_name': 'edge_index',
-            'n_rows': self.n_edge_cppname,
-            'n_cols': 'TWO'
-        }
-        configs['edge_index_config'] = matrix_config_template.format(**edge_index_params)
-
-        edge_update_params = {
-            'matrix_name': 'edge_update',
-            'n_rows': self.n_edge_cppname,
-            'n_cols': f"LAYER{self.index}_OUT_DIM"
-        }
-        configs['edge_update_config'] = matrix_config_template.format(**edge_update_params)
-
-        edge_update_aggr_params = {
-            'matrix_name': 'edge_update_aggr',
-            'n_rows': self.n_node_cppname,
-            'n_cols': f"LAYER{self.index}_OUT_DIM"
-        }
-        configs['edge_update_aggr_config'] = matrix_config_template.format(**edge_update_aggr_params)
-
-        aggregate_config_template = """struct aggregation_config{index}: nnet::aggregate_config{{
+        # aggregation configs
+        single_aggregate_config_template = """struct aggregation_config{index}: nnet::aggregate_config{{
             static const unsigned n_node = {n_node};
             static const unsigned n_edge = {n_edge};
             static const unsigned edge_dim = {edge_dim};
         }};"""
-
         aggregation_params = {
             "index": 1,
             "n_node": self.n_node,
             "n_edge": self.n_edge,
             "edge_dim": self.out_dim
         }
-        configs["aggregate_config"] = aggregate_config_template.format(**aggregation_params)
+        configs["aggregate_config"] = single_aggregate_config_template.format(**aggregation_params)
 
         return configs
 
@@ -2119,6 +2109,7 @@ class NodeBlock(GraphBlock):
         top_config = '\n'.join(top_config)
 
         sublayer_configs = self._config_sublayers()
+        sublayer_configs.update(self._config_misc())
         for layer, config in sublayer_configs.items():
             config = ['    ' + i for i in config.split('\n')]
             config = '\n'.join(config)
@@ -2145,45 +2136,28 @@ class NodeBlock(GraphBlock):
         params['n_zeros'] = 0
         return params
 
-    def _config_sublayers(self):
-        linear_count = 0
-        relu_count = 0
+    def _config_misc(self):
         configs = OrderedDict()
 
-        for name, module in self.submodules.items():
-            if name == '':
-                continue
+        # matrix configs
+        matrix_config_template = """struct {matrix_name}_config: nnet::matrix_config{{
+                            static const unsigned n_rows = {n_rows};
+                            static const unsigned n_cols = {n_cols};
+                        }};"""
 
-            if isinstance(module, torch.nn.modules.linear.Linear):
-                linear_count += 1
-                linear_params = self.get_dense_params(module, linear_count)
-                linear_config = self.config_layer('Dense', linear_params)
-                configs[f"dense_config{linear_count}"] = linear_config
-                last_n_out = linear_params['n_out']
+        configs['node_attr_config'] = matrix_config_template.format(matrix_name="node_attr",
+                                                                    n_rows=self.n_node_cppname,
+                                                                    n_cols=self.node_dim_cppname)
 
-            elif isinstance(module, torch.nn.modules.activation.ReLU):
-                relu_count += 1
-                relu_params = self.get_relu_params(relu_count, last_n_out)
-                relu_config = self.config_layer('Activation', relu_params)
-                configs[f"relu_config{relu_count}"] = relu_config
-                last_n_out = relu_params['n_in']
+        configs['edge_attr_aggr_config'] = matrix_config_template.format(matrix_name="edge_attr_aggr",
+                                                                         n_rows=self.n_node_cppname,
+                                                                         n_cols=f"LAYER{self.index - 1}_OUT_DIM")
 
-        # DUMMIES
-        if linear_count < 4:
-            for i in range(linear_count+1, 5):
-                linear_config_i = linear_config.split('\n')
-                linear_config_i[0] = re.sub(f"dense_config{linear_count}", f"dense_config{i}", linear_config_i[0])
-                linear_config_i = "\n".join(linear_config_i)
-                configs[f"dense_config{i}"] = linear_config_i
+        configs['node_update_config'] = matrix_config_template.format(matrix_name="node_update",
+                                                                      n_rows=self.n_node_cppname,
+                                                                      n_cols=f"LAYER{self.index}_OUT_DIM")
 
-        if relu_count < 4:
-            for i in range(relu_count+1, 5):
-                relu_config_i = relu_config.split('\n')
-                relu_config_i[0] = re.sub(f"relu_config{relu_count}", f"relu_config{i}", relu_config_i[0])
-                relu_config_i = '\n'.join(relu_config_i)
-                configs[f"relu_config{i}"] = relu_config_i
-
-        # merge configs
+        # concatenation configs
         concat_config_template = self.model.config.backend.get_config_template('Concatenate')
         concat_config_template = re.sub('config{index}', 'merge_config{index}', concat_config_template)
         merge_config1_params = {
@@ -2198,33 +2172,6 @@ class NodeBlock(GraphBlock):
         }
         merge_config1 = concat_config_template.format(**merge_config1_params)
         configs['merge_config1'] = merge_config1
-
-        # mat_to_vec, vec_to_mat configs
-        matrix_config_template = """struct {matrix_name}_config: nnet::matrix_config{{
-                    static const unsigned n_rows = {n_rows};
-                    static const unsigned n_cols = {n_cols};
-                }};"""
-
-        node_attr_params = {
-            'matrix_name': 'node_attr',
-            'n_rows': self.n_node_cppname,
-            'n_cols': self.node_dim_cppname
-        }
-        configs['node_attr_config'] = matrix_config_template.format(**node_attr_params)
-
-        edge_attr_aggr_params = {
-            'matrix_name': 'edge_attr_aggr',
-            'n_rows': self.n_node_cppname,
-            'n_cols': f"LAYER{self.index-1}_OUT_DIM"
-        }
-        configs['edge_attr_aggr_config'] = matrix_config_template.format(**edge_attr_aggr_params)
-
-        node_update_params = {
-            'matrix_name': 'node_update',
-            'n_rows': self.n_node_cppname,
-            'n_cols': f"LAYER{self.index}_OUT_DIM"
-        }
-        configs['node_update_config'] = matrix_config_template.format(**node_update_params)
 
         return configs
 

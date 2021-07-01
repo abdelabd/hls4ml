@@ -8,7 +8,6 @@ from hls4ml.model.hls_layers import HLSType, IntegerPrecisionType, FixedPrecisio
 
 
 class PygModelReader(PyTorchModelReader):
-
     def __init__(self, config):
         super().__init__(config)
         self.n_node = config['n_node']
@@ -43,8 +42,8 @@ class PygModelReader(PyTorchModelReader):
         return data
 
 def pyg_to_hls(model, forward_dict, graph_dims,
-               fixed_precision_bits=32,
-               fixed_precision_int_bits=16,
+               fixed_precision_bits=16,
+               fixed_precision_int_bits=6,
                int_precision_bits=16,
                int_precision_signed=False):
 
@@ -123,7 +122,6 @@ def pyg_to_hls(model, forward_dict, graph_dims,
     layer_list.append(EdgeIndex_layer)
 
     # TODO: add aggregation layer if first layer is NodeBlock
-    
     for key, val in forward_dict.items():
         layer_dict = {
             "name": key,
@@ -170,6 +168,7 @@ def pyg_to_hls(model, forward_dict, graph_dims,
             layer_dict["outputs"] = [f"layer{index}_out_L", f"layer{index}_out_Q"]
 
         layer_list.append(layer_dict)
+
 
     return config, reader, layer_list
 
