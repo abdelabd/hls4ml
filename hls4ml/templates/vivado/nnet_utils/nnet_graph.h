@@ -80,7 +80,7 @@ namespace nnet {
 
       if(!initialized){
         nnet::init_div_table<CONFIG_T, CONFIG_T::n_edge>(div_table);
-        initialized=true
+        initialized=true;
       }
 
       if(CONFIG_T::io_type==io_parallel){
