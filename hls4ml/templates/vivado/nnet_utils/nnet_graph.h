@@ -19,6 +19,7 @@ namespace nnet {
     // Internal data type definitions
     typedef float bias_t;
     typedef float weight_t;
+    typedef float table_t;
     
     // Layer Sizes
     static const unsigned n_node = 10;
@@ -49,6 +50,47 @@ namespace nnet {
      static const unsigned aggr = 0;
      static const unsigned flow = 0;
   };
+
+  // division-LUT for mean-aggregation
+  inline float division(float input){
+    return 1.0/input;
+  }
+  template<typename CONFIG_T, int N_TABLE>
+  void init_div_table(typename CONFIG_T::table_t table_out[N_TABLE]){
+    int j = 0;
+    typename CONFIG_T::table_t k = 1;
+    table_out[j] = k;
+    for(int i=1; i<N_TABLE; i++){
+      float in_val = float(i);
+      typename CONFIG_T::table_t reciprocal = nnet::division(in_val);
+      table_out[i] = reciprocal;
+    }
+  }
+
+  template<class data_T, class index_T, class res_T, typename CONFIG_T>
+  void edge_divide(data_T edge_sum_i, index_T n_edges_i, res_T &edge_mean_i){
+    // initialize LUT
+  #ifdef __HLS_SYN__
+      bool initialized=false;
+      typename CONFIG_T::table_t div_table[CONFIG_T::n_edge];
+  #else
+      static bool initialized=false;
+      static typename CONFIG_T::table_t div_table[CONFIG_T::n_edge];
+  #endif
+
+      if(!initialized){
+        nnet::init_div_table<CONFIG_T, CONFIG_T::n_edge>(div_table);
+        initialized=true
+      }
+
+      if(CONFIG_T::io_type==io_parallel){
+        #pragma HLS PIPELINE
+      }
+
+      data_T reciprocal;
+      reciprocal = div_table[n_edges_i];
+      edge_mean_i = edge_sum_i*reciprocal;
+  }
 
   template<class data_T, class res_T, typename CONFIG_T>
     void dense_mult_1lyr(
@@ -183,20 +225,15 @@ namespace nnet {
   }
 
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
-    void aggregate_add(
+    void aggregate(
             data_T    edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim],
             index_T   edge_index[CONFIG_T::n_edge][2],
             res_T     edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim])
     {
-      index_T r;
-      for(int i=0; i<CONFIG_T::n_edge; i++){
-        if(CONFIG_T::flow==0){ //flow=target_to_source
-          r = edge_index[i][1];
-        }
-        else if(CONFIG_T::flow==1){ //flow=source_to_target
-          r = edge_index[i][0];
-        }
 
+      for(int i=0; i<CONFIG_T::n_edge; i++){
+
+        index_T r = edge_index[i][1]; // 'x_i'
         for(int j=0; j<CONFIG_T::edge_dim; j++){
           #pragma HLS UNROLL
           edge_attr_aggr[r][j] += edge_attr[i][j];
@@ -376,7 +413,10 @@ namespace nnet {
       }
       else if(CONFIG_T::aggr==1){ //if aggregation-method is "mean", we have to divide by the number of edges
         for (int j=0; j<CONFIG_T::out_dim; j++){
-            edge_update_aggr[i][j] = edge_update_aggr[i][j]/num_edge_per_node[i];
+            res_T edge_mean_j;
+            nnet::edge_divide<res_T, index_T, res_T, CONFIG_T>(edge_update_aggr[i][j], num_edge_per_node[i], edge_mean_j);
+            edge_update_aggr[i][j] = edge_mean_j;
+            //edge_update_aggr[i][j] = edge_update_aggr[i][j]/num_edge_per_node[i];
         }
       }
     }

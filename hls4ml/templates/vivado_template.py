@@ -333,6 +333,7 @@ garnet_stack_config_template = (garnet_stack_base_config_template, garnet_stack_
 EdgeBlock_config_template = """struct config{index}: nnet::graph_config{{
     typedef {bias_t} bias_t;
     typedef {weight_t} weight_t;
+    typedef {table_t} table_t;
     static const unsigned n_node = {n_node};
     static const unsigned n_edge = {n_edge};
     static const unsigned node_dim = {node_dim};
@@ -351,6 +352,7 @@ EdgeBlock_config_template = """struct config{index}: nnet::graph_config{{
 NodeBlock_config_template = """struct config{index}: nnet::graph_config{{
     typedef {bias_t} bias_t;
     typedef {weight_t} weight_t;
+    typedef {table_t} table_t;
     static const unsigned n_node = {n_node};
     static const unsigned n_edge = {n_edge};
     static const unsigned node_dim = {node_dim}; 
