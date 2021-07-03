@@ -5,6 +5,7 @@ import torch
 from hls4ml.converters.pytorch_to_hls import PyTorchModelReader
 from hls4ml.utils.config import create_vivado_config
 from hls4ml.model.hls_layers import HLSType, IntegerPrecisionType, FixedPrecisionType
+from hls4ml.model.hls_model import HLSModel_GNN
 
 
 class PygModelReader(PyTorchModelReader):
@@ -42,6 +43,8 @@ class PygModelReader(PyTorchModelReader):
         return data
 
 def pyg_to_hls(model, forward_dict, graph_dims,
+               activate_final = None,
+               output_dir = None,
                fixed_precision_bits=16,
                fixed_precision_int_bits=6,
                int_precision_bits=16,
@@ -82,10 +85,12 @@ def pyg_to_hls(model, forward_dict, graph_dims,
     config['InputEdgeIndex'] = 'tb_data/input_edge_index.dat'
     config['OutputPredictions'] = 'tb_data/output_predictions.dat'
     config['HLSConfig']['Model'] = {
-        'Precision': 'ap_fixed<16,6>',
+        'Precision': f"ap_fixed<{fixed_precision_bits}, {fixed_precision_int_bits}>",
         'ReuseFactor': 1,
         'Strategy': 'Latency'
     }
+    if output_dir is not None:
+        config['OutputDir'] = config['OutputDir'] + output_dir
 
     # make reader
     reader = PygModelReader(config)
@@ -169,6 +174,19 @@ def pyg_to_hls(model, forward_dict, graph_dims,
 
         layer_list.append(layer_dict)
 
+    if activate_final is not None:
+        layer_dict = {
+            'name': 'final_act',
+            'class_name': 'Activation',
+            'inputs': ['layer6_out_L'],
+            'activation': activate_final,
+            'precision': fp_type
+        }
+        layer_list.append(layer_dict)
 
-    return config, reader, layer_list
+    hls_model = HLSModel_GNN(config, reader, layer_list)
+    hls_model.inputs = ['node_attr', 'edge_attr', 'edge_index']
+    hls_model.outputs = [layer_list[-1]['name']]
+
+    return hls_model
 

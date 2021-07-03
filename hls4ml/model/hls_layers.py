@@ -1775,9 +1775,11 @@ class GraphBlock(Layer): #parent class for EdgeBlock, NodeBlock
         params['iotype'] = 'io_parallel'
         params['reuse'] = 1
         params['nzeros'] = 0
-        params['accum_t'] = 'ap_fixed<32,16>'
-        params['bias_t'] = 'ap_fixed<16,6>'
-        params['weight_t'] = 'ap_fixed<16,6>'
+
+        params['accum_t'] = self.fp_cpp
+        params['bias_t'] = self.fp_cpp
+        params['weight_t'] = self.fp_cpp
+
         return params
 
     def get_relu_params(self, relu_count, last_n_out):
@@ -1896,6 +1898,9 @@ class EdgeBlock(GraphBlock):
                          compression=self.model.config.get_compression(self))
         self.add_bias(quantizer=self.get_attr('weight_quantizer'))
 
+        self.fp_type = self.attributes['precision']
+        self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
+
     def function_cpp(self):
         params = {}
         params['config'] = 'config{}'.format(self.index)
@@ -1941,8 +1946,9 @@ class EdgeBlock(GraphBlock):
     def get_EdgeBlock_params(self):  # hard-coded for now
         params = {}
         params['index'] = self.index
-        params['bias_t'] = 'ap_fixed<16,6>'
-        params['weight_t'] = 'ap_fixed<16,6>'
+        params['bias_t'] = self.fp_cpp
+        params['weight_t'] = self.fp_cpp
+        params['table_t'] = self.fp_cpp
         params['n_node'] = self.n_node_cppname
         params['n_edge'] = self.n_edge_cppname
         params['node_dim'] = self.node_dim_cppname
@@ -2081,6 +2087,9 @@ class NodeBlock(GraphBlock):
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
 
+        self.fp_type = self.attributes['precision']
+        self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
+
     def function_cpp(self):
         params = {}
         params['config'] = 'config{}'.format(self.index)
@@ -2123,8 +2132,9 @@ class NodeBlock(GraphBlock):
     def get_NodeBlock_params(self):  # hard-coded for now
         params = {}
         params['index'] = self.index
-        params['bias_t'] = 'ap_fixed<16,6>'
-        params['weight_t'] = 'ap_fixed<16,6>'
+        params['bias_t'] = self.fp_cpp
+        params['weight_t'] = self.fp_cpp
+        params['table_t'] = self.fp_cpp
         params['n_node'] = self.n_node_cppname
         params['n_edge'] = self.n_edge_cppname
         params['node_dim'] = self.node_dim_cppname
