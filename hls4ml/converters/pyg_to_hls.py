@@ -78,7 +78,7 @@ def pyg_to_hls(model, forward_dict, graph_dims,
     config['InputShape'] = {
         'NodeAttr': [n, p],
         'EdgeAttr': [m, q],
-        'EdgeIndex': [2, m]
+        'EdgeIndex': [m, 2]
     }
     config['InputNodeData'] = 'tb_data/input_node_data.dat'
     config['InputEdgeData'] = 'tb_data/input_edge_data.dat'
@@ -95,7 +95,7 @@ def pyg_to_hls(model, forward_dict, graph_dims,
     # make reader
     reader = PygModelReader(config)
 
-    #make layer list
+    # initiate layer list
     layer_list = []
     input_shapes = reader.input_shape
     NodeAttr_layer = {
@@ -121,12 +121,30 @@ def pyg_to_hls(model, forward_dict, graph_dims,
         'class_name': 'InputLayer',
         'input_shape': input_shapes['EdgeIndex'],
         'inputs': 'input',
-        'dim_names': ['TWO', 'N_EDGE'],
+        'dim_names': ['N_EDGE', 'TWO'],
         'precision': int_type
     }
     layer_list.append(EdgeIndex_layer)
+    last_node_update = "node_attr"
+    last_edge_update = "edge_attr"
 
-    # TODO: add aggregation layer if first layer is NodeBlock
+    # If the first block is a NodeBlock, we need a layer to construct the initial edge_aggregates
+    if forward_dict[list(forward_dict.keys())[0]] == "NodeBlock":
+        aggr_layer = {"name": "Aggr1",
+                       "class_name": "Aggregate",
+                       "n_node": n,
+                       "n_edge": m,
+                       "node_dim": p,
+                       "edge_dim": q,
+                       "precision": fp_type,
+                       "out_dim": q,
+                       "inputs": ["edge_attr", "edge_index"],
+                       "outputs": ["edge_attr_aggr"]}
+        layer_list.append(aggr_layer)
+        last_edge_aggr_update = "edge_attr_aggr"
+    else: last_edge_aggr_update = None
+
+    # complete the layer list
     for key, val in forward_dict.items():
         layer_dict = {
             "name": key,
@@ -155,38 +173,36 @@ def pyg_to_hls(model, forward_dict, graph_dims,
 
         # get inputs, outputs
         index = len(layer_list)+1
-        last_node_update = "node_attr"
-        last_edge_update = "edge_attr"
-        last_edge_update_aggr = "edge_attr_aggr"
-        for l in layer_list:
-            if l["class_name"] == "NodeBlock":
-                last_node_update = l["outputs"][0]
-            elif l["class_name"] == "EdgeBlock":
-                last_edge_update = l["outputs"][0]
-                last_edge_update_aggr = l["outputs"][1]
-
         if val=="NodeBlock":
-            layer_dict["inputs"] = [last_node_update, last_edge_update_aggr]
+            layer_dict["inputs"] = [last_node_update, last_edge_aggr_update]
             layer_dict["outputs"] = [f"layer{index}_out_P"]
+            last_node_update = f"layer{index}_out_P"
         elif val=="EdgeBlock":
             layer_dict["inputs"] = [last_node_update, last_edge_update, "edge_index"]
             layer_dict["outputs"] = [f"layer{index}_out_L", f"layer{index}_out_Q"]
+            last_edge_update = f"layer{index}_out_L"
+            last_edge_aggr_update = f"layer{index}_out_Q"
 
         layer_list.append(layer_dict)
 
     if activate_final is not None:
-        layer_dict = {
+        act_dict = {
             'name': 'final_act',
             'class_name': 'Activation',
             'inputs': ['layer6_out_L'],
             'activation': activate_final,
             'precision': fp_type
         }
-        layer_list.append(layer_dict)
+        layer_list.append(act_dict)
+        out = ["final_act"]
+        hls_model = HLSModel_GNN(config, reader, layer_list)
+        hls_model.inputs = ['node_attr', 'edge_attr', 'edge_index']
+        hls_model.outputs = [layer_list[-1]['name']]
+    else:
+        out = [layer_list[-1]['outputs'][0]]
 
     hls_model = HLSModel_GNN(config, reader, layer_list)
     hls_model.inputs = ['node_attr', 'edge_attr', 'edge_index']
-    hls_model.outputs = [layer_list[-1]['name']]
-
+    hls_model.outputs = out
     return hls_model
 
