@@ -1861,18 +1861,17 @@ class GraphBlock(Layer): #parent class for EdgeBlock, NodeBlock
 
 class EdgeBlock(GraphBlock):
     def initialize(self):
-        assert (len(self.inputs) == 3)  # edge_features, node_features, edge_index
-        assert (len(self.outputs) == 2)  # edge_predictions, aggregated node_predictions
-
         self.n_node = self.attributes['n_node']
         self.n_edge = self.attributes['n_edge']
         self.node_dim = self.attributes['node_dim']
         self.edge_dim = self.attributes['edge_dim']
         self.out_dim = self.attributes['out_dim']
+        self._check_inputs()
+
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
-        self.torch_module = getattr(self.model.reader.torch_model, self.name)
 
+        self.torch_module = getattr(self.model.reader.torch_model, self.name)
         submodules = OrderedDict()
         try:
             for name, module in self.torch_module.layers.named_modules():
@@ -2050,20 +2049,33 @@ class EdgeBlock(GraphBlock):
 
         return configs
 
+    def _check_inputs(self):
+        #expected inputs: node_attr, edge_attr, edge_index
+        assert (len(self.inputs) == 3)
+        node_attr = self.model.get_layer_output_variable(self.inputs[0])
+        assert(node_attr.shape==[self.n_node, self.node_dim])
+        edge_attr = self.model.get_layer_output_variable(self.inputs[1])
+        assert(edge_attr.shape==[self.n_edge, self.edge_dim])
+        edge_index = self.model.get_layer_output_variable(self.inputs[2])
+        assert(edge_index.shape==[self.n_edge, 2])
+
+        #expected outputs: edge_update, edge_update_aggr
+        assert (len(self.outputs) == 2)
+
+
 class NodeBlock(GraphBlock):
     def initialize(self):
-        assert (len(self.inputs) == 2)  # node_features, per-node-aggregated edge_features
-        assert (len(self.outputs) == 1)  # node_predictions
-
         self.n_node = self.attributes['n_node']
         self.n_edge = self.attributes['n_edge']
         self.node_dim = self.attributes['node_dim']
         self.edge_dim = self.attributes['edge_dim']
         self.out_dim = self.attributes['out_dim']
+        self._check_inputs()
+
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
-        self.torch_module = getattr(self.model.reader.torch_model, self.name)
 
+        self.torch_module = getattr(self.model.reader.torch_model, self.name)
         submodules = OrderedDict()
         try:
             for name, module in self.torch_module.layers.named_modules():
@@ -2095,8 +2107,8 @@ class NodeBlock(GraphBlock):
         params['config'] = 'config{}'.format(self.index)
         params['input_t'] = self.model.get_layer_output_variable('node_attr').type.name
         params['output_t'] = self.get_output_variable().type.name
-        params['node_attr'] = self.model.get_layer_output_variable('node_attr').cppname
-        params['Q'] = self.model.get_layer_output_variable(f'layer{self.index-1}_out_Q').cppname
+        params['node_attr'] = self.attributes["inputs"][0]
+        params['Q'] = self.attributes["inputs"][1]
         params['P'] = f"layer{self.index}_out_P"
 
         params['w0'] = self.get_weights(f"{self.name}_w0").name
@@ -2185,7 +2197,127 @@ class NodeBlock(GraphBlock):
 
         return configs
 
-    
+    def _check_inputs(self):
+        #expected inputs: node_attr, edge_attr_aggr
+        assert(len(self.inputs)==2)
+        node_attr = self.model.get_layer_output_variable(self.inputs[0])
+        assert(node_attr.shape==[self.n_node, self.node_dim])
+        edge_attr_aggr = self.model.get_layer_output_variable(self.inputs[1])
+        assert(edge_attr_aggr.shape==[self.n_node, self.edge_dim])
+
+        #expected outputs: node_update
+        assert(len(self.outputs)==1)
+
+class Aggregate(Layer):
+    def initialize(self):
+        self.n_node = self.attributes['n_node']
+        self.n_edge = self.attributes['n_edge']
+        self.node_dim = self.attributes['node_dim']
+        self.edge_dim = self.attributes['edge_dim']
+        self.out_dim = self.attributes['out_dim']
+        self._check_inputs()
+
+        self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
+        self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
+
+        aggr_name = f"layer{self.index}_out_Q"
+        aggr_shape = [self.n_node, self.out_dim]
+        aggr_dims = ['N_NODE', f'LAYER{self.index}_OUT_DIM']
+        self.add_output_variable(shape=aggr_shape, dim_names=aggr_dims, out_name=aggr_name, var_name=aggr_name,
+                                 precision=self.attributes.get('precision', None))
+
+        self.fp_type = self.attributes['precision']
+        self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
+
+    def function_cpp(self):
+        params = {}
+        params['config'] = 'aggregation_config{}'.format(self.index)
+        params['input_t'] = self.model.get_layer_output_variable('edge_attr').type.name
+        params['index_t'] = self.model.get_layer_output_variable('edge_index').type.name
+        params['output_t'] = self.get_output_variable().type.name
+
+        params['edge_attr'] = self.attributes["inputs"][0]
+        params['edge_index'] = self.attributes["inputs"][1]
+        params['edge_attr_aggr'] = f"layer{self.index}_out_Q"
+        return [self._function_template.format(**params)]
+
+    def config_cpp(self):
+        params = self.get_Aggregate_params()
+
+        top_config = self._config_template.format(**params)
+        top_config = top_config.split('\n')[:-1]
+        top_config = '\n'.join(top_config)
+
+        sub_configs = self._config_misc()
+        for layer, config in sub_configs.items():
+            config = ['    ' + i for i in config.split('\n')]
+            config = '\n'.join(config)
+
+            top_config += '\n\n'
+            top_config += config
+
+        top_config += '\n};'
+        return top_config
+
+    def get_Aggregate_params(self):
+        params = {}
+        params["index"] = self.index
+        params['n_node'] = self.attributes['n_node']
+        params['node_dim'] = self.attributes['node_dim']
+        params['n_edge'] = self.attributes['n_edge']
+        params['edge_dim'] = self.attributes['edge_dim']
+        params['table_t'] = self.fp_cpp
+
+        flow_map = {"source_to_target": 0, "target_to_source": 1}
+        params['flow'] = flow_map[self.model.reader.torch_model.flow]
+
+        aggr_map = {"add": 0, "mean": 1, "max": 2}
+        params['aggr'] = aggr_map[self.model.reader.torch_model.aggr]
+
+        params['io_type'] = 'io_parallel'
+
+        return params
+
+    def _config_misc(self):
+        # matrix configs
+        configs = {}
+        matrix_config_template = """struct {matrix_name}_config: nnet::matrix_config{{
+                            static const unsigned n_rows = {n_rows};
+                            static const unsigned n_cols = {n_cols};
+                        }};"""
+
+        configs['edge_attr_config'] = matrix_config_template.format(matrix_name="edge_attr",
+                                                                    n_rows=self.n_edge_cppname,
+                                                                    n_cols=self.edge_dim_cppname)
+
+        configs['edge_index_config'] = matrix_config_template.format(matrix_name="edge_index",
+                                                                     n_rows=self.n_edge_cppname,
+                                                                     n_cols="TWO")
+
+        configs['edge_attr_aggr_config'] = matrix_config_template.format(matrix_name="edge_attr_aggr",
+                                                                           n_rows=self.n_node_cppname,
+                                                                           n_cols=f"LAYER{self.index}_OUT_DIM")
+
+        aggr_params = self.get_Aggregate_params()
+        nested_duplicate = self._config_template.format(**aggr_params).split('\n')
+        nested_duplicate[0] = "struct nested_duplicate: nnet::aggregate_config{"
+        nested_duplicate = '\n'.join(nested_duplicate)
+        configs['nested_duplicate'] = nested_duplicate
+
+        return configs
+
+    def _check_inputs(self):
+        #expected inputs: edge_attr, edge_index
+        assert(len(self.inputs)==2)
+        edge_attr = self.model.get_layer_output_variable(self.inputs[0])
+        assert(edge_attr.shape==[self.n_edge, self.edge_dim])
+        edge_index = self.model.get_layer_output_variable(self.inputs[1])
+        assert(edge_index.shape==[self.n_edge, 2])
+
+        #expected outputs: edge_attr_aggr
+        assert(len(self.outputs)==1)
+
+
 layer_map = {
     'Input'                  : Input,
     'InputLayer'             : Input,
@@ -2231,6 +2363,7 @@ layer_map = {
     'GarNetStack'            : GarNetStack,
     'EdgeBlock'              : EdgeBlock,
     'NodeBlock'              : NodeBlock,
+    'Aggregate'            : Aggregate,
     # TensorFlow-specific layers:
     'BiasAdd'                : BiasAdd,
 }
