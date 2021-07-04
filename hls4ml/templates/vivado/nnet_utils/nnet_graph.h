@@ -44,6 +44,7 @@ namespace nnet {
 
   struct aggregate_config
   {
+     typedef float table_t;
      static const unsigned n_node = 10;
      static const unsigned n_edge = 20;
      static const unsigned edge_dim = 4;
@@ -66,7 +67,6 @@ namespace nnet {
       table_out[i] = reciprocal;
     }
   }
-
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
   void edge_divide(data_T edge_sum_i, index_T n_edges_i, res_T &edge_mean_i){
     // initialize LUT
@@ -149,44 +149,6 @@ namespace nnet {
     nnet::dense_resource_basic<data_T, res_T, typename CONFIG_T::dense_config3>(data1, res, weights2, biases2);
   }
 
-    template<class data_T, class res_T, typename CONFIG_T>
-    void dense_mult_3lyr_with_save(
-			 data_T data[CONFIG_T::dense_config1::n_in],
-			 res_T res[CONFIG_T::dense_config3::n_out],
-			 res_T fc1_output[CONFIG_T::dense_config1::n_out],
-			 res_T relu1_output[CONFIG_T::dense_config1::n_out],
-			 res_T fc2_output[CONFIG_T::dense_config2::n_out],
-			 res_T relu2_output[CONFIG_T::dense_config2::n_out],
-			 res_T fc3_output[CONFIG_T::dense_config3::n_out],
-			 typename CONFIG_T::dense_config1::weight_t weights0[CONFIG_T::dense_config1::n_in*CONFIG_T::dense_config1::n_out],
-			 typename CONFIG_T::dense_config1::bias_t   biases0[CONFIG_T::dense_config1::n_out],
-			 typename CONFIG_T::dense_config2::weight_t weights1[CONFIG_T::dense_config2::n_in*CONFIG_T::dense_config2::n_out],
-			 typename CONFIG_T::dense_config2::bias_t   biases1[CONFIG_T::dense_config2::n_out],
-			 typename CONFIG_T::dense_config3::weight_t weights2[CONFIG_T::dense_config3::n_in*CONFIG_T::dense_config3::n_out],
-			 typename CONFIG_T::dense_config3::bias_t   biases2[CONFIG_T::dense_config3::n_out])
-  {
-    data_T data0_logits[CONFIG_T::dense_config1::n_out];
-    #pragma HLS ARRAY_PARTITION variable=data0_logits complete dim=0
-    nnet::dense_resource_basic<data_T, data_T, typename CONFIG_T::dense_config1>(data, data0_logits, weights0, biases0);
-    nnet::dense_resource_basic<data_T, data_T, typename CONFIG_T::dense_config1>(data, fc1_output, weights0, biases0);
-    data_T data0[CONFIG_T::dense_config1::n_out];
-    #pragma HLS ARRAY_PARTITION variable=data0 complete dim=0
-    nnet::relu<data_T, data_T, typename CONFIG_T::relu_config1>(data0_logits, data0);
-    nnet::relu<data_T, data_T, typename CONFIG_T::relu_config1>(data0_logits, relu1_output);
-
-    data_T data1_logits[CONFIG_T::dense_config2::n_out];
-    #pragma HLS ARRAY_PARTITION variable=data1_logits complete dim=0
-    nnet::dense_resource_basic<data_T, data_T, typename CONFIG_T::dense_config2>(data0, data1_logits, weights1, biases1);
-    nnet::dense_resource_basic<data_T, data_T, typename CONFIG_T::dense_config2>(data0, fc2_output, weights1, biases1);
-    data_T data1[CONFIG_T::dense_config2::n_out];
-    #pragma HLS ARRAY_PARTITION variable=data1 complete dim=0
-    nnet::relu<data_T, data_T, typename CONFIG_T::relu_config2>(data1_logits, data1);
-    nnet::relu<data_T, data_T, typename CONFIG_T::relu_config2>(data1_logits, relu2_output);
-
-    nnet::dense_resource_basic<data_T, res_T, typename CONFIG_T::dense_config3>(data1, res, weights2, biases2);
-    nnet::dense_resource_basic<data_T, res_T, typename CONFIG_T::dense_config3>(data1, fc3_output, weights2, biases2);
-  }
-
   template<class data_T, class res_T, typename CONFIG_T>
     void dense_mult_4lyr(
 			 data_T data[CONFIG_T::dense_config1::n_in],
@@ -224,23 +186,6 @@ namespace nnet {
     nnet::dense_resource_basic<data_T, res_T, typename CONFIG_T::dense_config4>(data2, res, weights3, biases3);
   }
 
-  template<class data_T, class index_T, class res_T, typename CONFIG_T>
-    void aggregate(
-            data_T    edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim],
-            index_T   edge_index[CONFIG_T::n_edge][2],
-            res_T     edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim])
-    {
-
-      for(int i=0; i<CONFIG_T::n_edge; i++){
-
-        index_T r = edge_index[i][1]; // 'x_i'
-        for(int j=0; j<CONFIG_T::edge_dim; j++){
-          #pragma HLS UNROLL
-          edge_attr_aggr[r][j] += edge_attr[i][j];
-        }
-      }
-    }
-
   template<class data_T, class res_T, typename CONFIG_T>
     void aggregate_single_edge_add(
           data_T    edge_attr_single[CONFIG_T::edge_dim],
@@ -276,6 +221,80 @@ namespace nnet {
         edge_attr_aggr[j] = edge_attr_single[j];
       }
     }
+
+  template<class data_T, class index_T, class res_T, typename CONFIG_T>
+    void aggregate(
+            data_T    edge_attr_1D[CONFIG_T::n_edge*CONFIG_T::edge_dim],
+            index_T   edge_index_1D[CONFIG_T::n_edge*2],
+            res_T     edge_attr_aggr_1D[CONFIG_T::n_node*CONFIG_T::edge_dim])
+  {
+      //initialize arrays
+      // 1. edge_attr (input)
+      data_T edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim];
+      #pragma HLS ARRAY_PARTITION variable=edge_attr complete dim=0
+      nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_config>(edge_attr_1D, edge_attr);
+
+      // 2. edge_index (input)
+      index_T edge_index[CONFIG_T::n_edge][2];
+      #pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
+      nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
+      if(CONFIG_T::io_stream){
+        #pragma HLS STREAM variable=edge_index
+      }
+
+      //3. edge_attr_agg(output)
+      res_T edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim];
+      #pragma HLS ARRAY_PARTITION variable=edge_update_aggr complete dim=0
+
+      index_T num_edge_per_node[CONFIG_T::n_node];
+      for(int i=0; i<CONFIG_T::n_node; i++){
+        num_edge_per_node[i]=0;
+      }
+
+      for(int i=0; i<CONFIG_T::n_edge; i++){
+        index_T r;
+        if(CONFIG_T::flow==0){//flow=source_to_target
+          r = edge_index[i][1];
+        }
+        else{//flow=target_to_source
+          r = edge_index[i][0];
+        }
+        num_edge_per_node[r] += 1;
+
+        if(num_edge_per_node[r] <= 1){//this the first edge sent to receiver-index, so there's nothing to aggregate with
+          nnet::replace_single_edge<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
+        }
+        else{
+          if((CONFIG_T::aggr==0)||(CONFIG_T::aggr==1)){//aggr=sum or mean
+            nnet::aggregate_single_edge_add<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
+          }
+          else if(CONFIG_T::aggr==2){//aggr=max
+            nnet::aggregate_single_edge_max<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
+          }
+        }
+      }
+
+      res_T zeros[CONFIG_T::edge_dim];
+      for(int i=0; i<CONFIG_T::edge_dim; i++){
+        zeros[i]=0;
+      }
+      for(int i=0; i<CONFIG_T::n_node; i++){
+        if(num_edge_per_node[i] < 1){
+          nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::nested_duplicate>(zeros, edge_attr_aggr[i]);
+        }
+        else if(CONFIG_T::aggr==1){//aggr=mean
+          for (int j=0; j<CONFIG_T::edge_dim; j++){
+            res_T edge_mean_ij;
+            nnet::edge_divide<data_T, index_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr_aggr[i][j], num_edge_per_node[i], edge_mean_ij);
+            edge_attr_aggr[i][j] = edge_mean_ij;
+          }
+        }
+      }
+
+      //output array --> output vec
+      nnet::mat_to_vec<res_T, res_T, typename CONFIG_T::edge_attr_aggr_config>(edge_attr_aggr, edge_attr_aggr_1D);
+
+  }
 
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
     void EdgeBlock(
