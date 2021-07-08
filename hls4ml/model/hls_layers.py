@@ -1884,13 +1884,13 @@ class EdgeBlock(GraphBlock):
         # edge predictions
         L_shape = [self.n_edge, self.out_dim]
         L_dims = ['N_EDGE', f"LAYER{self.index}_OUT_DIM"]
-        L_name = f"layer{self.index}_out_L"
+        L_name = f"layer{self.index}_out"
         self.add_output_variable(shape=L_shape, dim_names=L_dims, out_name=L_name, var_name=L_name, precision=self.attributes.get('precision', None))
 
         # per-node-aggregated edge predictions
         Q_shape = [self.n_node, self.out_dim]
         Q_dims = ['N_NODE', f"LAYER{self.index}_OUT_DIM"]
-        Q_name = f"layer{self.index}_out_Q"
+        Q_name = f"layer{self.index}_out_aggr"
         self.add_output_variable(shape=Q_shape, dim_names=Q_dims, out_name=Q_name, var_name=Q_name, precision=self.attributes.get('precision', None))
 
         self.add_weights(quantizer=self.get_attr('weight_quantizer'),
@@ -1909,8 +1909,8 @@ class EdgeBlock(GraphBlock):
         params['node_attr'] = self.attributes['inputs'][0]
         params['edge_attr'] = self.attributes['inputs'][1]
         params['edge_index'] = self.attributes['inputs'][2]
-        params['L'] = f"layer{self.index}_out_L"
-        params['Q'] = f"layer{self.index}_out_Q"
+        params['out'] = f"layer{self.index}_out"
+        params['out_aggr'] = f"layer{self.index}_out_aggr"
 
         params['w0'] = self.get_weights(f"{self.name}_w0").name
         params['b0'] = self.get_weights(f"{self.name}_b0").name
@@ -2062,7 +2062,6 @@ class EdgeBlock(GraphBlock):
         #expected outputs: edge_update, edge_update_aggr
         assert (len(self.outputs) == 2)
 
-
 class NodeBlock(GraphBlock):
     def initialize(self):
         self.n_node = self.attributes['n_node']
@@ -2089,7 +2088,7 @@ class NodeBlock(GraphBlock):
         # node predictions
         P_shape = [self.n_node, self.out_dim]
         P_dims = ['N_NODE', f"LAYER{self.index}_OUT_DIM"]
-        P_name = f"layer{self.index}_out_P"
+        P_name = f"layer{self.index}_out"
         self.add_output_variable(shape=P_shape, dim_names=P_dims, out_name=P_name, var_name=P_name, precision=self.attributes.get('precision', None))
 
         self.add_weights(quantizer=self.get_attr('weight_quantizer'),
@@ -2108,8 +2107,8 @@ class NodeBlock(GraphBlock):
         params['input_t'] = self.model.get_layer_output_variable('node_attr').type.name
         params['output_t'] = self.get_output_variable().type.name
         params['node_attr'] = self.attributes["inputs"][0]
-        params['Q'] = self.attributes["inputs"][1]
-        params['P'] = f"layer{self.index}_out_P"
+        params['edge_attr_aggr'] = self.attributes["inputs"][1]
+        params['out'] = f"layer{self.index}_out"
 
         params['w0'] = self.get_weights(f"{self.name}_w0").name
         params['b0'] = self.get_weights(f"{self.name}_b0").name
@@ -2220,7 +2219,7 @@ class Aggregate(Layer):
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
 
-        aggr_name = f"layer{self.index}_out_Q"
+        aggr_name = f"layer{self.index}_out"
         aggr_shape = [self.n_node, self.out_dim]
         aggr_dims = ['N_NODE', f'LAYER{self.index}_OUT_DIM']
         self.add_output_variable(shape=aggr_shape, dim_names=aggr_dims, out_name=aggr_name, var_name=aggr_name,
@@ -2238,7 +2237,7 @@ class Aggregate(Layer):
 
         params['edge_attr'] = self.attributes["inputs"][0]
         params['edge_index'] = self.attributes["inputs"][1]
-        params['edge_attr_aggr'] = f"layer{self.index}_out_Q"
+        params['out'] = f"layer{self.index}_out"
         return [self._function_template.format(**params)]
 
     def config_cpp(self):

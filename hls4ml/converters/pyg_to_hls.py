@@ -44,11 +44,11 @@ class PygModelReader(PyTorchModelReader):
 
 def pyg_to_hls(model, forward_dict, graph_dims,
                activate_final = None,
-               output_dir = None,
                fixed_precision_bits=16,
                fixed_precision_int_bits=6,
                int_precision_bits=16,
-               int_precision_signed=False):
+               int_precision_signed=False,
+               output_dir = None):
 
     # get graph dimensions
     n = graph_dims.get("n_node_max", 112)
@@ -175,13 +175,13 @@ def pyg_to_hls(model, forward_dict, graph_dims,
         index = len(layer_list)+1
         if val=="NodeBlock":
             layer_dict["inputs"] = [last_node_update, last_edge_aggr_update]
-            layer_dict["outputs"] = [f"layer{index}_out_P"]
-            last_node_update = f"layer{index}_out_P"
+            layer_dict["outputs"] = [f"layer{index}_out"]
+            last_node_update = f"layer{index}_out"
         elif val=="EdgeBlock":
             layer_dict["inputs"] = [last_node_update, last_edge_update, "edge_index"]
-            layer_dict["outputs"] = [f"layer{index}_out_L", f"layer{index}_out_Q"]
-            last_edge_update = f"layer{index}_out_L"
-            last_edge_aggr_update = f"layer{index}_out_Q"
+            layer_dict["outputs"] = [f"layer{index}_out", f"layer{index}_out_aggr"]
+            last_edge_update = f"layer{index}_out"
+            last_edge_aggr_update = f"layer{index}_out_aggr"
 
         layer_list.append(layer_dict)
 
@@ -189,15 +189,12 @@ def pyg_to_hls(model, forward_dict, graph_dims,
         act_dict = {
             'name': 'final_act',
             'class_name': 'Activation',
-            'inputs': ['layer6_out_L'],
+            'inputs': ['layer6_out'],
             'activation': activate_final,
             'precision': fp_type
         }
         layer_list.append(act_dict)
         out = ["final_act"]
-        hls_model = HLSModel_GNN(config, reader, layer_list)
-        hls_model.inputs = ['node_attr', 'edge_attr', 'edge_index']
-        hls_model.outputs = [layer_list[-1]['name']]
     else:
         out = [layer_list[-1]['outputs'][0]]
 
