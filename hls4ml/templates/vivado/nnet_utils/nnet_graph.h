@@ -430,6 +430,7 @@ namespace nnet {
       if(num_edge_per_node[i] < 1){ //disconnected nodes should have zeros in place of their edge_attr_aggr
         nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(zeros, edge_update_aggr[i]);
       }
+
       else if(CONFIG_T::aggr==1){ //if aggregation-method is "mean", we have to divide by the number of edges
         for (int j=0; j<CONFIG_T::out_dim; j++){
             res_T edge_mean_j;
