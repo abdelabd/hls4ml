@@ -80,9 +80,7 @@ def pyg_to_hls(model, forward_dict, graph_dims,
         'EdgeAttr': [m, q],
         'EdgeIndex': [m, 2]
     }
-    config['InputNodeData'] = 'tb_data/input_node_data.dat'
-    config['InputEdgeData'] = 'tb_data/input_edge_data.dat'
-    config['InputEdgeIndex'] = 'tb_data/input_edge_index.dat'
+    config['InputData'] = 'tb_data/input_data.dat'
     config['OutputPredictions'] = 'tb_data/output_predictions.dat'
     config['HLSConfig']['Model'] = {
         'Precision': f"ap_fixed<{fixed_precision_bits}, {fixed_precision_int_bits}>",
