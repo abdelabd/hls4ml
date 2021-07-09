@@ -13,6 +13,8 @@
 #include <math.h>
 
 namespace nnet {
+  enum flow {source_to_target=0, target_to_source=1};
+  enum aggr {aggr_sum=0, aggr_mean=1, aggr_max=2};
   
   struct graph_config
   {
@@ -30,12 +32,11 @@ namespace nnet {
     static const unsigned n_layers = 3;
 
     // message-passing parameters
-    static const unsigned aggr = 0;
-    static const unsigned flow = 0;
+    static const unsigned aggr = aggr_sum;
+    static const unsigned flow = source_to_target;
     
     // Resource reuse info
     static const unsigned io_type = io_parallel;
-    static const unsigned io_stream = false;
     static const unsigned reuse_factor = 1;
     static const unsigned n_zeros = 0;
 
@@ -48,8 +49,8 @@ namespace nnet {
      static const unsigned n_node = 10;
      static const unsigned n_edge = 20;
      static const unsigned edge_dim = 4;
-     static const unsigned aggr = 0;
-     static const unsigned flow = 0;
+     static const unsigned aggr = aggr_sum;
+     static const unsigned flow = source_to_target;
   };
 
   // division-LUT for mean-aggregation
@@ -238,9 +239,6 @@ namespace nnet {
       index_T edge_index[CONFIG_T::n_edge][2];
       #pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
       nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
-      if(CONFIG_T::io_stream){
-        #pragma HLS STREAM variable=edge_index
-      }
 
       //3. edge_attr_aggr (output)
       res_T edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim];
@@ -253,7 +251,7 @@ namespace nnet {
 
       for(int i=0; i<CONFIG_T::n_edge; i++){
         index_T r;
-        if(CONFIG_T::flow==0){//flow=source_to_target
+        if(CONFIG_T::flow == source_to_target){//flow=source_to_target
           r = edge_index[i][1];
         }
         else{//flow=target_to_source
@@ -265,10 +263,10 @@ namespace nnet {
           nnet::replace_single_edge<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
         }
         else{
-          if((CONFIG_T::aggr==0)||(CONFIG_T::aggr==1)){//aggr=sum or mean
+	  if(CONFIG_T::aggr == aggr_sum || CONFIG_T::aggr == aggr_mean){//aggr=sum or mean
             nnet::aggregate_single_edge_add<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
           }
-          else if(CONFIG_T::aggr==2){//aggr=max
+          else {//aggr=max
             nnet::aggregate_single_edge_max<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
           }
         }
@@ -285,6 +283,7 @@ namespace nnet {
         }
         else if(CONFIG_T::aggr==1){//aggr=mean
           for (int j=0; j<CONFIG_T::edge_dim; j++){
+            #pragma HLS UNROLL
             res_T edge_mean_ij;
             nnet::edge_divide<data_T, index_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr_aggr[i][j], num_edge_per_node[i], edge_mean_ij);
             edge_attr_aggr[i][j] = edge_mean_ij;
@@ -328,9 +327,6 @@ namespace nnet {
     index_T edge_index[CONFIG_T::n_edge][2];
     #pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
     nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
-    if(CONFIG_T::io_stream){
-      #pragma HLS STREAM variable=edge_index
-    }
 
     // 4. num_edge_per_node (intermediate)
     index_T num_edge_per_node[CONFIG_T::n_node];
@@ -354,7 +350,7 @@ namespace nnet {
       // get sender, receiver indices
       index_T s;
       index_T r;
-      if(CONFIG_T::flow==0){ //flow='source_to_target'
+      if(CONFIG_T::flow == source_to_target){ //flow='source_to_target'
         s = edge_index[i][0];
         r = edge_index[i][1];
       }
@@ -413,10 +409,10 @@ namespace nnet {
         nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
       }
       else{
-        if((CONFIG_T::aggr==0)||(CONFIG_T::aggr==1)){ //aggr="add" or "mean"
+	  if(CONFIG_T::aggr == aggr_sum ||  CONFIG_T::aggr == aggr_mean){ //aggr="add" or "mean"
           nnet::aggregate_single_edge_add<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
         }
-        else if(CONFIG_T::aggr==2){ //aggr="max"
+        else { //aggr="max"
           nnet::aggregate_single_edge_max<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
         }
       }
@@ -504,7 +500,7 @@ namespace nnet {
 	      nnet::dense_mult_3lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2);
 	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config3>(node_update_logits, node_update[i]);
 	    }
-	    else if(CONFIG_T::n_layers == 4){
+	    else { // CONFIG_T::n_layers == 4
 	      nnet::dense_mult_4lyr<data_T, data_T, CONFIG_T>(phi_input, node_update_logits, core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2, core_node_w3, core_node_b3);
 	      nnet::relu<data_T, res_T, typename CONFIG_T::relu_config4>(node_update_logits, node_update[i]);
 	    }
@@ -519,7 +515,7 @@ namespace nnet {
         else if(CONFIG_T::n_layers == 3){
 	      nnet::dense_mult_3lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2);
         }
-        else if(CONFIG_T::n_layers == 4){
+        else { // CONFIG_T::n_layers == 4
 	      nnet::dense_mult_4lyr<data_T, res_T, CONFIG_T>(phi_input, node_update[i], core_node_w0, core_node_b0, core_node_w1, core_node_b1, core_node_w2, core_node_b2, core_node_w3, core_node_b3);
         }
       }
@@ -539,9 +535,6 @@ namespace nnet {
 			   typename CONFIG_T::dense_config2::weight_t  w1[CONFIG_T::dense_config2::n_in*CONFIG_T::dense_config2::n_out],
 			   typename CONFIG_T::dense_config2::bias_t    b1[CONFIG_T::dense_config2::n_out])
   {
-    if(CONFIG_T::io_stream){
-      #pragma HLS STREAM variable=X
-    }
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
     data_T R0_logits[CONFIG_T::dense_config1::n_batch][CONFIG_T::dense_config1::n_out];
     #pragma HLS ARRAY_PARTITION variable=R0_logits complete dim=0

@@ -1901,18 +1901,18 @@ class EdgeBlock(GraphBlock):
         self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
 
         # Reshape the input/output variables
-        for input_name in self.inputs:
-            input_array = self.get_input_variable(input_name)
-            partition_factor = input_array.shape[0]
-            if input_name in self.model.inputs:
-                input_array.pragma = ('reshape', 'block', partition_factor)
-            else:
-                input_array.pragma = ('partition', 'block', partition_factor)
+        #for input_name in self.inputs:
+        #    input_array = self.get_input_variable(input_name)
+        #    partition_factor = input_array.shape[0]
+        #    if input_name in self.model.inputs:
+        #        input_array.pragma = ('reshape', 'block', partition_factor)
+        #    else:
+        #        input_array.pragma = ('partition', 'block', partition_factor)
 
-        for output_name in self.outputs:
-            output_array = self.get_output_variable(output_name)
-            partition_factor = output_array.shape[0]
-            output_array.pragma = ('partition', 'block', partition_factor)
+        #for output_name in self.outputs:
+        #    output_array = self.get_output_variable(output_name)
+        #    partition_factor = output_array.shape[0]
+        #    output_array.pragma = ('partition', 'block', partition_factor)
 
     def function_cpp(self):
         params = {}
@@ -2116,19 +2116,18 @@ class NodeBlock(GraphBlock):
         self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
 
         # Reshape the input/output variables
-        for input_name in self.inputs:
-            input_array = self.get_input_variable(input_name)
-            partition_factor = input_array.shape[0]
-            if input_name in self.model.inputs:
-                input_array.pragma = ('reshape', 'block', partition_factor)
-            else:
-                input_array.pragma = ('partition', 'block', partition_factor)
+        #for input_name in self.inputs:
+        #    input_array = self.get_input_variable(input_name)
+        #    partition_factor = input_array.shape[0]
+        #    if input_name in self.model.inputs:
+        #        input_array.pragma = ('reshape', 'block', partition_factor)
+        #    else:
+        #        input_array.pragma = ('partition', 'block', partition_factor)
 
-        for output_name in self.outputs:
-            output_array = self.get_output_variable(output_name)
-            partition_factor = output_array.shape[0]
-            output_array.pragma = ('partition', 'block', partition_factor)
-
+        #for output_name in self.outputs:
+        #    output_array = self.get_output_variable(output_name)
+        #    partition_factor = output_array.shape[0]
+        #    output_array.pragma = ('partition', 'block', partition_factor)
 
     def function_cpp(self):
         params = {}
