@@ -1885,13 +1885,13 @@ class EdgeBlock(GraphBlock):
         L_shape = [self.n_edge, self.out_dim]
         L_dims = ['N_EDGE', f"LAYER{self.index}_OUT_DIM"]
         L_name = f"layer{self.index}_out"
-        self.add_output_variable(shape=L_shape, dim_names=L_dims, out_name=L_name, var_name=L_name, precision=self.attributes.get('precision', None))
+        self.add_output_variable(shape=L_shape, dim_names=L_dims, out_name=L_name, var_name=L_name, precision=self.attributes.get('precision', None), pragma='partition')
 
         # per-node-aggregated edge predictions
         Q_shape = [self.n_node, self.out_dim]
         Q_dims = ['N_NODE', f"LAYER{self.index}_OUT_DIM"]
         Q_name = f"layer{self.index}_out_aggr"
-        self.add_output_variable(shape=Q_shape, dim_names=Q_dims, out_name=Q_name, var_name=Q_name, precision=self.attributes.get('precision', None))
+        self.add_output_variable(shape=Q_shape, dim_names=Q_dims, out_name=Q_name, var_name=Q_name, precision=self.attributes.get('precision', None), pragma='partition')
 
         self.add_weights(quantizer=self.get_attr('weight_quantizer'),
                          compression=self.model.config.get_compression(self))
@@ -1899,6 +1899,20 @@ class EdgeBlock(GraphBlock):
 
         self.fp_type = self.attributes['precision']
         self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
+
+        # Reshape the input/output variables
+        for input_name in self.inputs:
+            input_array = self.get_input_variable(input_name)
+            partition_factor = input_array.shape[0]
+            if input_name in self.model.inputs:
+                input_array.pragma = ('reshape', 'block', partition_factor)
+            else:
+                input_array.pragma = ('partition', 'block', partition_factor)
+
+        for output_name in self.outputs:
+            output_array = self.get_output_variable(output_name)
+            partition_factor = output_array.shape[0]
+            output_array.pragma = ('partition', 'block', partition_factor)
 
     def function_cpp(self):
         params = {}
@@ -2089,7 +2103,7 @@ class NodeBlock(GraphBlock):
         P_shape = [self.n_node, self.out_dim]
         P_dims = ['N_NODE', f"LAYER{self.index}_OUT_DIM"]
         P_name = f"layer{self.index}_out"
-        self.add_output_variable(shape=P_shape, dim_names=P_dims, out_name=P_name, var_name=P_name, precision=self.attributes.get('precision', None))
+        self.add_output_variable(shape=P_shape, dim_names=P_dims, out_name=P_name, var_name=P_name, precision=self.attributes.get('precision', None), pragma='partition')
 
         self.add_weights(quantizer=self.get_attr('weight_quantizer'),
                          compression=self.model.config.get_compression(self))
@@ -2100,6 +2114,21 @@ class NodeBlock(GraphBlock):
 
         self.fp_type = self.attributes['precision']
         self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
+
+        # Reshape the input/output variables
+        for input_name in self.inputs:
+            input_array = self.get_input_variable(input_name)
+            partition_factor = input_array.shape[0]
+            if input_name in self.model.inputs:
+                input_array.pragma = ('reshape', 'block', partition_factor)
+            else:
+                input_array.pragma = ('partition', 'block', partition_factor)
+
+        for output_name in self.outputs:
+            output_array = self.get_output_variable(output_name)
+            partition_factor = output_array.shape[0]
+            output_array.pragma = ('partition', 'block', partition_factor)
+
 
     def function_cpp(self):
         params = {}

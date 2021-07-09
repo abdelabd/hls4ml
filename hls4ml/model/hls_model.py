@@ -571,7 +571,8 @@ class HLSModel(object):
     
 class HLSModel_GNN(HLSModel):
     def __init__(self, config, reader, layer_list):
-        super().__init__(config, reader, layer_list)
+        inputs = [layer['name'] for layer in layer_list if layer['class_name'] == 'InputLayer']
+        super().__init__(config, reader, layer_list, inputs=inputs)
         self.config.writer = VivadoWriter_GNN()
 
     def get_weights_data(self, module_name, layer_name, var_name):
