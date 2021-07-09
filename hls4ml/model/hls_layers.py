@@ -2033,6 +2033,20 @@ class EdgeBlock(GraphBlock):
         merge_config2 = concat_config_template.format(**merge_config2_params)
         configs['merge_config2'] = merge_config2
 
+        # aggregation configs
+        single_aggregate_config_template = """struct aggregation_config{index}: nnet::aggregate_config{{
+                    static const unsigned n_node = {n_node};
+                    static const unsigned n_edge = {n_edge};
+                    static const unsigned edge_dim = {edge_dim};
+                }};"""
+        aggregation_params = {
+            "index": 1,
+            "n_node": self.n_node,
+            "n_edge": self.n_edge,
+            "edge_dim": self.out_dim
+        }
+        configs["aggregate_config"] = single_aggregate_config_template.format(**aggregation_params)
+
         return configs
 
     def _check_inputs(self):
