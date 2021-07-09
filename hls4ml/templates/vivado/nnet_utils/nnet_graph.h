@@ -316,17 +316,17 @@ namespace nnet {
     //initialize arrays
     // 1. node_attr (input)
     data_T node_attr[CONFIG_T::n_node][CONFIG_T::node_dim];
-    //#pragma HLS ARRAY_PARTITION variable=node_attr complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=node_attr complete dim=0
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::node_attr_config>(node_attr_1D, node_attr);
 
     // 2. edge_attr (input)
     data_T edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim];
-    //#pragma HLS ARRAY_PARTITION variable=edge_attr complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=edge_attr complete dim=0
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_config>(edge_attr_1D, edge_attr);
 
     // 3. edge_index (input)
     index_T edge_index[CONFIG_T::n_edge][2];
-    //#pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
     nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
     if(CONFIG_T::io_stream){
       #pragma HLS STREAM variable=edge_index
@@ -334,18 +334,18 @@ namespace nnet {
 
     // 4. num_edge_per_node (intermediate)
     index_T num_edge_per_node[CONFIG_T::n_node];
-    //#pragma HLS ARRAY_PARTITION variable=num_edge_per_node complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=num_edge_per_node complete dim=0
     for(int i=0; i<CONFIG_T::n_node; i++){
         num_edge_per_node[i] = 0;
     }
 
     // 5. edge_update (output)
     res_T edge_update[CONFIG_T::n_edge][CONFIG_T::out_dim];
-    //#pragma HLS ARRAY_PARTITION variable=edge_update complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=edge_update complete dim=0
 
     // 6. edge_update_aggr (output)
     res_T edge_update_aggr[CONFIG_T::n_node][CONFIG_T::out_dim];
-    //#pragma HLS ARRAY_PARTITION variable=edge_update_aggr complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=edge_update_aggr complete dim=0
 
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
     edge_loop: for(int i = 0; i < CONFIG_T::n_edge; i++) { //for each edge
@@ -467,17 +467,17 @@ namespace nnet {
     //initialize arrays
     //1. node_attr (input)
     data_T node_attr[CONFIG_T::n_node][CONFIG_T::node_dim];
-    //#pragma HLS ARRAY_PARTITION variable=node_attr complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=node_attr complete dim=0
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::node_attr_config>(node_attr_1D, node_attr);
 
     //2. edge_attr_aggr (input)
     data_T edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim];
-    //#pragma HLS ARRAY_PARTITION variable=edge_attr_aggr complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=edge_attr_aggr complete dim=0
     nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_aggr_config>(edge_attr_aggr_1D, edge_attr_aggr);
 
     // 3. node_update (output)
     res_T node_update[CONFIG_T::n_node][CONFIG_T::out_dim];
-    //#pragma HLS ARRAY_PARTITION variable=node_update complete dim=0
+    #pragma HLS ARRAY_PARTITION variable=node_update complete dim=0
 
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
     node_loop: for(int i = 0; i < CONFIG_T::n_node; i++){ //for each node
