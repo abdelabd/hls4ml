@@ -1825,7 +1825,7 @@ class GraphBlock(Layer): #parent class for EdgeBlock, NodeBlock
         configs = OrderedDict()
 
         for name, module in self.submodules.items():
-            if name == '':
+            if module.__class__.__name__==self.model.reader.torch_model.__class__.__name__:
                 continue
 
             if module.__class__.__name__ == "Linear":
@@ -1870,6 +1870,7 @@ class EdgeBlock(GraphBlock):
 
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
+        self.out_dim_cppname = f"LAYER{self.index}_OUT_DIM"
 
         self.torch_module = getattr(self.model.reader.torch_model, self.name)
         submodules = OrderedDict()
@@ -1882,16 +1883,16 @@ class EdgeBlock(GraphBlock):
         self.submodules = submodules
 
         # edge predictions
-        L_shape = [self.n_edge, self.out_dim]
-        L_dims = ['N_EDGE', f"LAYER{self.index}_OUT_DIM"]
-        L_name = f"layer{self.index}_out"
-        self.add_output_variable(shape=L_shape, dim_names=L_dims, out_name=L_name, var_name=L_name, precision=self.attributes.get('precision', None), pragma='partition')
+        out_shape = [self.n_edge, self.out_dim]
+        out_dims = [self.n_edge_cppname, self.out_dim_cppname]
+        out_name = f"layer{self.index}_out"
+        self.add_output_variable(shape=out_shape, dim_names=out_dims, out_name=out_name, var_name=out_name, precision=self.attributes.get('precision', None), pragma='partition')
 
         # per-node-aggregated edge predictions
-        Q_shape = [self.n_node, self.out_dim]
-        Q_dims = ['N_NODE', f"LAYER{self.index}_OUT_DIM"]
-        Q_name = f"layer{self.index}_out_aggr"
-        self.add_output_variable(shape=Q_shape, dim_names=Q_dims, out_name=Q_name, var_name=Q_name, precision=self.attributes.get('precision', None), pragma='partition')
+        out_aggr_shape = [self.n_node, self.out_dim]
+        out_aggr_dims = [self.n_node_cppname, self.out_dim_cppname]
+        out_aggr_name = f"layer{self.index}_out_aggr"
+        self.add_output_variable(shape=out_aggr_shape, dim_names=out_aggr_dims, out_name=out_aggr_name, var_name=out_aggr_name, precision=self.attributes.get('precision', None), pragma='partition')
 
         self.add_weights(quantizer=self.get_attr('weight_quantizer'),
                          compression=self.model.config.get_compression(self))
@@ -2066,10 +2067,13 @@ class EdgeBlock(GraphBlock):
     def _check_inputs(self):
         #expected inputs: node_attr, edge_attr, edge_index
         assert (len(self.inputs) == 3)
+
         node_attr = self.model.get_layer_output_variable(self.inputs[0])
         assert(node_attr.shape==[self.n_node, self.node_dim])
+
         edge_attr = self.model.get_layer_output_variable(self.inputs[1])
         assert(edge_attr.shape==[self.n_edge, self.edge_dim])
+
         edge_index = self.model.get_layer_output_variable(self.inputs[2])
         assert(edge_index.shape==[self.n_edge, 2])
 
@@ -2087,6 +2091,7 @@ class NodeBlock(GraphBlock):
 
         self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
         self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
+        self.out_dim_cppname = f"LAYER{self.index}_OUT_DIM"
 
         self.torch_module = getattr(self.model.reader.torch_model, self.name)
         submodules = OrderedDict()
@@ -2098,19 +2103,15 @@ class NodeBlock(GraphBlock):
                 submodules[name] = module
         self.submodules = submodules
 
-
         # node predictions
-        P_shape = [self.n_node, self.out_dim]
-        P_dims = ['N_NODE', f"LAYER{self.index}_OUT_DIM"]
-        P_name = f"layer{self.index}_out"
-        self.add_output_variable(shape=P_shape, dim_names=P_dims, out_name=P_name, var_name=P_name, precision=self.attributes.get('precision', None), pragma='partition')
+        out_shape = [self.n_node, self.out_dim]
+        out_dims = [self.n_node_cppname, self.out_dim_cppname]
+        out_name = f"layer{self.index}_out"
+        self.add_output_variable(shape=out_shape, dim_names=out_dims, out_name=out_name, var_name=out_name, precision=self.attributes.get('precision', None), pragma='partition')
 
         self.add_weights(quantizer=self.get_attr('weight_quantizer'),
                          compression=self.model.config.get_compression(self))
         self.add_bias(quantizer=self.get_attr('weight_quantizer'))
-
-        self.n_edge_cppname, self.edge_dim_cppname = self.model.get_layer_output_variable('edge_attr').dim_names
-        self.n_node_cppname, self.node_dim_cppname = self.model.get_layer_output_variable('node_attr').dim_names
 
         self.fp_type = self.attributes['precision']
         self.fp_cpp = f"ap_fixed<{self.fp_type.width}, {self.fp_type.integer}>"
@@ -2227,8 +2228,10 @@ class NodeBlock(GraphBlock):
     def _check_inputs(self):
         #expected inputs: node_attr, edge_attr_aggr
         assert(len(self.inputs)==2)
+
         node_attr = self.model.get_layer_output_variable(self.inputs[0])
         assert(node_attr.shape==[self.n_node, self.node_dim])
+
         edge_attr_aggr = self.model.get_layer_output_variable(self.inputs[1])
         assert(edge_attr_aggr.shape==[self.n_node, self.edge_dim])
 
@@ -2336,14 +2339,15 @@ class Aggregate(Layer):
     def _check_inputs(self):
         #expected inputs: edge_attr, edge_index
         assert(len(self.inputs)==2)
+
         edge_attr = self.model.get_layer_output_variable(self.inputs[0])
         assert(edge_attr.shape==[self.n_edge, self.edge_dim])
+
         edge_index = self.model.get_layer_output_variable(self.inputs[1])
         assert(edge_index.shape==[self.n_edge, 2])
 
         #expected outputs: edge_attr_aggr
         assert(len(self.outputs)==1)
-
 
 layer_map = {
     'Input'                  : Input,

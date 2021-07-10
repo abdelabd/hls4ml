@@ -128,7 +128,7 @@ def pyg_to_hls(model, forward_dict, graph_dims,
 
     # If the first block is a NodeBlock, we need a layer to construct the initial edge_aggregates
     if forward_dict[list(forward_dict.keys())[0]] == "NodeBlock":
-        aggr_layer = {"name": "Aggr1",
+        aggr_layer = {"name": "aggr1",
                        "class_name": "Aggregate",
                        "n_node": n,
                        "n_edge": m,
@@ -197,7 +197,6 @@ def pyg_to_hls(model, forward_dict, graph_dims,
         out = [layer_list[-1]['outputs'][0]]
 
     hls_model = HLSModel_GNN(config, reader, layer_list)
-    hls_model.inputs = ['node_attr', 'edge_attr', 'edge_index']
     hls_model.outputs = out
     return hls_model
 
