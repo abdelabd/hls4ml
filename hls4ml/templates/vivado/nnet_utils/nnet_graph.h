@@ -392,7 +392,7 @@ namespace nnet {
         }
       }
       else{
-	  if(CONFIG_T::aggr == aggr_sum ||  CONFIG_T::aggr == aggr_mean){ //aggr="add" or "mean"
+	    if(CONFIG_T::aggr == aggr_sum ||  CONFIG_T::aggr == aggr_mean){ //aggr="add" or "mean"
           for(int j=0; j<CONFIG_T::out_dim; j++){
             #pragma HLS UNROLL
             edge_update_aggr[r][j] += edge_update[i][j];
@@ -414,11 +414,13 @@ namespace nnet {
           edge_update_aggr[i][j] = 0;
         }
       }
-      else if(CONFIG_T::aggr==1){ //if aggregation-method is "mean", we have to divide by the number of edges
-        for (int j=0; j<CONFIG_T::out_dim; j++){
+      else{
+        if(CONFIG_T::aggr==1){ //if aggregation-method is "mean", we have to divide by the number of edges
+          for (int j=0; j<CONFIG_T::out_dim; j++){
             res_T edge_mean_j;
             nnet::edge_divide<res_T, index_T, res_T, CONFIG_T>(edge_update_aggr[i][j], num_edge_per_node[i], edge_mean_j);
             edge_update_aggr[i][j] = edge_mean_j;
+          }
         }
       }
     }
