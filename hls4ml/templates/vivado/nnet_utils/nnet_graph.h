@@ -187,113 +187,90 @@ namespace nnet {
     nnet::dense_resource_basic<data_T, res_T, typename CONFIG_T::dense_config4>(data2, res, weights3, biases3);
   }
 
-  template<class data_T, class res_T, typename CONFIG_T>
-    void aggregate_single_edge_add(
-          data_T    edge_attr_single[CONFIG_T::edge_dim],
-          res_T     edge_attr_aggr[CONFIG_T::edge_dim]
-    )
-    {
-      for(int j=0; j<CONFIG_T::edge_dim; j++){
-        #pragma HLS UNROLL
-        edge_attr_aggr[j] += edge_attr_single[j];
-      }
-    }
-
-  template<class data_T, class res_T, typename CONFIG_T>
-    void aggregate_single_edge_max( //maybe max-pooling instead?
-          data_T    edge_attr_single[CONFIG_T::edge_dim],
-          res_T     edge_attr_aggr[CONFIG_T::edge_dim]
-    )
-    {
-      for(int j=0; j<CONFIG_T::edge_dim; j++){
-        #pragma HLS UNROLL
-        edge_attr_aggr[j] = edge_attr_single[j] > edge_attr_aggr[j] ? edge_attr_single[j] : edge_attr_aggr[j];
-      }
-    }
-
-  template<class data_T, class res_T, typename CONFIG_T>
-    void replace_single_edge(
-      data_T edge_attr_single[CONFIG_T::edge_dim],
-      res_T  edge_attr_aggr[CONFIG_T::edge_dim]
-    )
-    {
-      for(int j=0; j<CONFIG_T::edge_dim; j++){
-        #pragma HLS UNROLL
-        edge_attr_aggr[j] = edge_attr_single[j];
-      }
-    }
-
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
     void aggregate(
             data_T    edge_attr_1D[CONFIG_T::n_edge*CONFIG_T::edge_dim],
             index_T   edge_index_1D[CONFIG_T::n_edge*2],
             res_T     edge_attr_aggr_1D[CONFIG_T::n_node*CONFIG_T::edge_dim])
   {
-      //initialize arrays
-      // 1. edge_attr (input)
-      data_T edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim];
-      #pragma HLS ARRAY_PARTITION variable=edge_attr complete dim=0
-      nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_config>(edge_attr_1D, edge_attr);
+    //initialize arrays
+    // 1. edge_attr (input)
+    data_T edge_attr[CONFIG_T::n_edge][CONFIG_T::edge_dim];
+    #pragma HLS ARRAY_PARTITION variable=edge_attr complete dim=0
+    nnet::vec_to_mat<data_T, data_T, typename CONFIG_T::edge_attr_config>(edge_attr_1D, edge_attr);
 
-      // 2. edge_index (input)
-      index_T edge_index[CONFIG_T::n_edge][2];
-      #pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
-      nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
+    // 2. edge_index (input)
+    index_T edge_index[CONFIG_T::n_edge][2];
+    #pragma HLS ARRAY_PARTITION variable=edge_index complete dim=0
+    nnet::vec_to_mat<index_T, index_T, typename CONFIG_T::edge_index_config>(edge_index_1D, edge_index);
 
-      //3. edge_attr_aggr (output)
-      res_T edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim];
-      #pragma HLS ARRAY_PARTITION variable=edge_update_aggr complete dim=0
+    //3. num_edge_per_node (intermediate)
+    index_T num_edge_per_node[CONFIG_T::n_node];
+    for(int i=0; i<CONFIG_T::n_node; i++){
+      num_edge_per_node[i]=0;
+    }
 
-      index_T num_edge_per_node[CONFIG_T::n_node];
-      for(int i=0; i<CONFIG_T::n_node; i++){
-        num_edge_per_node[i]=0;
+    //4. edge_attr_aggr (output)
+    res_T edge_attr_aggr[CONFIG_T::n_node][CONFIG_T::edge_dim];
+    #pragma HLS ARRAY_PARTITION variable=edge_update_aggr complete dim=0
+
+    int sender_col;
+    int receiver_col;
+    if(CONFIG_T::flow == source_to_target){
+      sender_col = 0;
+      receiver_col = 1;
+    }
+    else{
+      sender_col = 1;
+      receiver_col = 0;
+    }
+
+    for(int i=0; i<CONFIG_T::n_edge; i++){
+      index_T s = edge_index[i][sender_col];
+      index_T r = edge_index[i][receiver_col];
+      num_edge_per_node[r] += 1;
+
+      if(num_edge_per_node[r] <= 1){//this the first edge sent to receiver-index, so there's nothing to aggregate with
+        for(int j=0; j<CONFIG_T::edge_dim; j++){
+          #pragma HLS UNROLL
+          edge_attr_aggr[r][j] = edge_attr[i][j];
+        }
       }
-
-      for(int i=0; i<CONFIG_T::n_edge; i++){
-        index_T r;
-        if(CONFIG_T::flow == source_to_target){//flow=source_to_target
-          r = edge_index[i][1];
-        }
-        else{//flow=target_to_source
-          r = edge_index[i][0];
-        }
-        num_edge_per_node[r] += 1;
-
-        if(num_edge_per_node[r] <= 1){//this the first edge sent to receiver-index, so there's nothing to aggregate with
-          nnet::replace_single_edge<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
-        }
-        else{
-	  if(CONFIG_T::aggr == aggr_sum || CONFIG_T::aggr == aggr_mean){//aggr=sum or mean
-            nnet::aggregate_single_edge_add<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
-          }
-          else {//aggr=max
-            nnet::aggregate_single_edge_max<data_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr[i], edge_attr_aggr[r]);
-          }
-        }
-      }
-
-      res_T zeros[CONFIG_T::edge_dim];
-      for(int i=0; i<CONFIG_T::edge_dim; i++){
-        zeros[i]=0;
-      }
-
-      for(int i=0; i<CONFIG_T::n_node; i++){
-        if(num_edge_per_node[i] < 1){
-          nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::nested_duplicate>(zeros, edge_attr_aggr[i]);
-        }
-        else if(CONFIG_T::aggr==1){//aggr=mean
-          for (int j=0; j<CONFIG_T::edge_dim; j++){
+      else{
+	    if(CONFIG_T::aggr == aggr_sum || CONFIG_T::aggr == aggr_mean){//aggr=sum or mean
+          for(int j=0; j<CONFIG_T::edge_dim; j++){
             #pragma HLS UNROLL
-            res_T edge_mean_ij;
-            nnet::edge_divide<data_T, index_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr_aggr[i][j], num_edge_per_node[i], edge_mean_ij);
-            edge_attr_aggr[i][j] = edge_mean_ij;
+            edge_attr_aggr[r][j] += edge_attr[i][j];
+          }
+        }
+        else {//aggr=max
+          for(int j=0; j<CONFIG_T::edge_dim; j++){
+            #pragma HLS UNROLL
+            edge_attr_aggr[r][j] = edge_attr[i][j] > edge_attr_aggr[r][j] ? edge_attr[i][j] : edge_attr_aggr[r][j];
           }
         }
       }
+    }
 
-      //output array --> output vec
-      nnet::mat_to_vec<res_T, res_T, typename CONFIG_T::edge_attr_aggr_config>(edge_attr_aggr, edge_attr_aggr_1D);
+    for(int i=0; i<CONFIG_T::n_node; i++){
+      if(num_edge_per_node[i] < 1){
+        for(int j=0; j<CONFIG_T::edge_dim; j++){ //disconnected nodes should have edge_aggr=<0,0,...,0>
+          #pragma HLS UNROLL
+          edge_attr_aggr[i][j] = 0;
+        }
+      }
+      else if(CONFIG_T::aggr==1){//aggr=mean
+        for (int j=0; j<CONFIG_T::edge_dim; j++){
+          #pragma HLS UNROLL
+          res_T edge_mean_ij;
+          nnet::edge_divide<data_T, index_T, res_T, typename CONFIG_T::nested_duplicate>(edge_attr_aggr[i][j], num_edge_per_node[i], edge_mean_ij);
+          edge_attr_aggr[i][j] = edge_mean_ij;
+        }
+      }
+    }
 
+    //output array --> output vec
+    nnet::mat_to_vec<res_T, res_T, typename CONFIG_T::edge_attr_aggr_config>(edge_attr_aggr, edge_attr_aggr_1D);
   }
 
   template<class data_T, class index_T, class res_T, typename CONFIG_T>
@@ -343,21 +320,24 @@ namespace nnet {
     res_T edge_update_aggr[CONFIG_T::n_node][CONFIG_T::out_dim];
     #pragma HLS ARRAY_PARTITION variable=edge_update_aggr complete dim=0
 
+    int sender_col;
+    int receiver_col;
+    if(CONFIG_T::flow == source_to_target){
+      sender_col = 0;
+      receiver_col = 1;
+    }
+    else{
+      sender_col = 1;
+      receiver_col = 0;
+    }
+
     #pragma HLS PIPELINE II=CONFIG_T::reuse_factor
     edge_loop: for(int i = 0; i < CONFIG_T::n_edge; i++) { //for each edge
       #pragma HLS UNROLL
 
       // get sender, receiver indices
-      index_T s;
-      index_T r;
-      if(CONFIG_T::flow == source_to_target){ //flow='source_to_target'
-        s = edge_index[i][0];
-        r = edge_index[i][1];
-      }
-      else{ //flow='target_to_source'
-        s = edge_index[i][1];
-        r = edge_index[i][0];
-      }
+      index_T s = edge_index[i][sender_col];
+      index_T r = edge_index[i][receiver_col];
       num_edge_per_node[r] += 1;
 
       // construct NN input: <receiver, sender, edge>
@@ -406,28 +386,34 @@ namespace nnet {
 
       // aggregation step
       if(num_edge_per_node[r] <= 1){ //if this is the first edge sent to that index, there's nothing to aggregate with
-        nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+        for(int j=0; j<CONFIG_T::out_dim; j++){
+          #pragma HLS UNROLL
+          edge_update_aggr[r][j] = edge_update[i][j];
+        }
       }
       else{
 	  if(CONFIG_T::aggr == aggr_sum ||  CONFIG_T::aggr == aggr_mean){ //aggr="add" or "mean"
-          nnet::aggregate_single_edge_add<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+          for(int j=0; j<CONFIG_T::out_dim; j++){
+            #pragma HLS UNROLL
+            edge_update_aggr[r][j] += edge_update[i][j];
+          }
         }
         else { //aggr="max"
-          nnet::aggregate_single_edge_max<res_T, res_T, typename CONFIG_T::aggregation_config1>(edge_update[i], edge_update_aggr[r]);
+          for(int j=0; j<CONFIG_T::out_dim; j++){
+            #pragma HLS UNROLL
+            edge_update_aggr[r][j] = edge_update[i][j] > edge_update_aggr[r][j] ? edge_update[i][j] : edge_update_aggr[r][j];
+          }
         }
       }
     }
 
-    // taking care of edge_update_aggr
-    res_T zeros[CONFIG_T::out_dim];
-    for(int j=0; j<CONFIG_T::out_dim; j++){
-          zeros[j]=0;
-    }
     for(int i=0; i < CONFIG_T::n_node; i++){
       if(num_edge_per_node[i] < 1){ //disconnected nodes should have edge_aggr=<0,0,...0>
-        nnet::replace_single_edge<res_T, res_T, typename CONFIG_T::aggregation_config1>(zeros, edge_update_aggr[i]);
+        for(int j=0; j<CONFIG_T::out_dim; j++){
+          #pragma HLS UNROLL
+          edge_update_aggr[i][j] = 0;
+        }
       }
-
       else if(CONFIG_T::aggr==1){ //if aggregation-method is "mean", we have to divide by the number of edges
         for (int j=0; j<CONFIG_T::out_dim; j++){
             res_T edge_mean_j;
@@ -443,7 +429,6 @@ namespace nnet {
 
     // 2. edge_update_aggr_1D
     nnet::mat_to_vec<res_T, res_T, typename CONFIG_T::edge_update_aggr_config>(edge_update_aggr, edge_update_aggr_1D);
-
   }
 
   template<class data_T, class res_T, typename CONFIG_T>
