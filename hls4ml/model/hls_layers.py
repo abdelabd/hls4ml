@@ -1917,6 +1917,7 @@ class EdgeBlock(GraphBlock):
 
     def function_cpp(self):
         params = {}
+        params['aggr'] = self.model.reader.torch_model.aggr
         params['config'] = 'config{}'.format(self.index)
         params['input_t'] = self.model.get_layer_output_variable('edge_attr').type.name
         params['index_t'] = self.model.get_layer_output_variable('edge_index').type.name
