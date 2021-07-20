@@ -345,6 +345,7 @@ EdgeBlock_config_template = """struct config{index}: nnet::graph_config{{
     static const unsigned io_type = nnet::{io_type};
     static const unsigned reuse_factor = {reuse};
     static const unsigned n_zeros = {n_zeros};
+    static const unsigned fp_int_bits = {fp_int_bits};
     static const bool io_stream = false; 
     static const bool activate_final = false;
 }};"""

@@ -1917,6 +1917,7 @@ class EdgeBlock(GraphBlock):
 
     def function_cpp(self):
         params = {}
+        params['aggr'] = self.model.reader.torch_model.aggr
         params['config'] = 'config{}'.format(self.index)
         params['input_t'] = self.model.get_layer_output_variable('edge_attr').type.name
         params['index_t'] = self.model.get_layer_output_variable('edge_index').type.name
@@ -1972,6 +1973,7 @@ class EdgeBlock(GraphBlock):
         params['io_type'] = 'io_parallel'
         params['reuse'] = 1
         params['n_zeros'] = 0
+        params['fp_int_bits'] = self.fp_type.integer
 
         aggr_map = {
             "add": 0,
